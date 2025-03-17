@@ -1,0 +1,222 @@
+---
+title: "Lyrical Analysis"
+output: html_document
+date: "2025-03-15"
+--- 
+# Load Libraries 
+```{r}
+library(class)
+library(tm)
+library(MASS)
+library(nnet)
+library(tidyverse)
+library(caret)
+```
+# Load Data
+```{r}
+# Read Lines
+lines <- readLines("lyran.csv", encoding = "UTF-8", warn = FALSE)
+## Incomplete Final Line Warning
+# Get only valid lines
+cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
+valid_lines <- cleaned_lines[!is.na(cleaned_lines)]
+# Write Cleaned to New File
+writeLines(valid_lines, "lyran_cleaned.csv")
+
+# Read the Cleaned File
+lyrics_data <- read.csv("lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
+```
+# Stop Words and Cleaning Data
+```{r}
+# Define your custom stop words
+custom_stopwords <- c("ah", "im", "ohohoh", "oo", "uhhuh", "nooh", "s", "yearold", "thatll", "hadnt", "theyve", "imma", "aint", "will", "gonna", "hes", "put", "cant","youve", "youd", "ill", "lets", "can", "ive", "got", "wouldve", "thats", "theyre", "youll", "oh", "dont", "id", "cottontail", "said", "youre", "get", "ooh", "ooooh", "aaaaaaahhhhhh", "aah", "aahooh", "ac", "ahahahahah", "ahh", "ai", "im", "abrams", "abramscagracie")
+# Combine custom stopwords with the default (english) stop words
+all_stopwords <- c(stopwords("en"), custom_stopwords)
+corpus <- Corpus(VectorSource(lyrics_data$lyrics))
+# Clean the corpus
+corpus_clean <- corpus %>%
+  tm_map(tolower) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, all_stopwords) %>%
+  tm_map(stripWhitespace)
+
+tidy_lyrics <- data.frame(
+  name = rep(lyrics_data$name, each = sapply(corpus_clean, length)),
+  artist = rep(lyrics_data$artist, each = sapply(corpus_clean, length)),
+  theme = rep(lyrics_data$theme, each = sapply(corpus_clean, length)),
+  text = sapply(corpus_clean, as.character),
+  row_id = seq_along(lyrics_data$name),  # Track the original row order
+  stringsAsFactors = FALSE
+)
+```
+# Reformatting Data
+```{r}
+# Make Unique Song_Artist_Id
+lyrics_data <- tidy_lyrics %>%
+  mutate(song_artist_id = paste(name, artist, sep = "_")) %>%
+  dplyr::select(song_artist_id, theme, text)
+```
+# Count Words
+```{r}
+lyrics_data_tokens <- lyrics_data %>% 
+  mutate(text = as.character(text)) %>% # Ensure text is character
+  unnest_tokens(output = word, input = text) %>% # Tokenize
+  group_by(song_artist_id, theme, word) %>% 
+  summarise(word_count = n(), .groups = "drop") # Count words
+
+```
+# Pivot 
+```{r}
+lyrics_data_wide <- lyrics_data_tokens %>%
+  pivot_wider(names_from = word, 
+              values_from = word_count,  # Use word_indicator instead of word_count
+              values_fill = 0,  # Fill missing values with 0
+              names_glue = "word_{word}",  # Custom column naming for words
+              names_repair = "unique")  # Make column names unique
+
+```
+# Normalize Within Column
+```{r}
+# Normalize each word column within the column (Min-Max Scaling)
+lyrics_data_normalized <- lyrics_data_wide %>%
+  mutate(across(starts_with("word_"), ~ (. - min(.)) / (max(.) - min(.)), .names = "norm_{.col}")) %>%
+  dplyr::select(-starts_with("word_"))
+```
+
+# Log Transform Then Do Within Column
+```{r}
+lyrics_data_log_norm <- lyrics_data_wide %>%
+  mutate(across(starts_with("word_"), ~ log(. + 1))) %>%  # Log-transform
+  mutate(across(starts_with("word_"), ~ (. - min(.)) / (max(.) - min(.))))  # Normalize
+
+```
+# Pivot Theme
+```{r}
+lyrics_theme_binary <- lyrics_data_tokens %>%
+  group_by(song_artist_id, theme) %>%
+  summarise(theme_indicator = 1, .groups = "drop")
+lyrics_theme_onehot <- lyrics_theme_binary %>%
+  pivot_wider(
+    names_from = theme,
+    values_from = theme_indicator,
+    values_fill = 0,
+    names_glue = "{theme}_theme" # Custom column naming for themes
+  )
+```
+```{r}
+lyrics_data_log_norm <- as.data.frame(lyrics_data_log_norm)
+
+lyrics_data_log_norm_factor <- lyrics_data_log_norm %>% mutate(theme_as_factor = factor(theme, ordered = FALSE))
+```
+```{r}
+lyrics_combined <- full_join(lyrics_theme_onehot, lyrics_data_log_norm_factor, by = join_by(song_artist_id)) %>% dplyr::select(!theme)
+```
+# Filter to Help Pick Words
+```{r}
+lyrics_data_log_norm %>%
+  filter(theme == "age/power dynamic") %>%  # Filter for the 'age/power dynamic' theme
+  pivot_longer(cols = -c(song_artist_id, theme), names_to = "word", values_to = "value") %>%  # Pivot to long format (exclude song_artist_id and theme columns)
+  filter(value > 0) %>%  # Only include rows where the word appears (value > 0)
+  group_by(song_artist_id, word) %>%
+  summarise(word_value_in_song = sum(value), .groups = "drop") %>%  # Count how many times the word appears in each unique song
+  group_by(word) %>%
+  summarise(
+    total_word_value = sum(word_value_in_song), # Total word occurrences across all songs
+    sd = sd(word_value_in_song),
+    unique_songs = n_distinct(song_artist_id),  # Number of unique songs the word appears in
+    .groups = "drop"
+  ) %>%
+  filter(unique_songs>1) %>%
+  arrange(desc(total_word_value))  # Sort by total word count in descending order
+```
+
+
+# Testing and Training Data
+```{r}
+lyrics_data_log_norm_factor <- as.data.frame(lyrics_data_log_norm_factor)
+lc_size <- floor(0.75 * nrow(lyrics_combined))
+
+# Set Seed
+set.seed(200)
+train_ind_lc <- sample(seq_len(nrow(lyrics_combined)), size = lc_size)
+
+train_lc <- lyrics_combined[train_ind_lc, ]
+test_lc <- lyrics_combined[-train_ind_lc, ]
+
+train_ldn <- lyrics_data_log_norm_factor[train_ind_lc, ]
+test_ldn <- lyrics_data_log_norm_factor[-train_ind_lc, ]
+
+
+```
+# LDA Fit
+```{r}
+lda.fit <- lda(theme_as_factor ~ word_afford, data = lyrics_data_log_norm_factor, subset = train_ind_lc)
+#print(lda.fit)
+```
+# LDA Results
+```{r}
+lda.pred <- predict(lda.fit, newdata = test_ldn)
+lda.class <- lda.pred$class
+lda_matrix <- table(Predicted = lda.class, Actual = test_ldn$theme_as_factor)
+#print(lda_matrix)
+actual_classes <- test_ldn$theme_as_factor
+accuracy <- mean(lda.class == actual_classes)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+conf_matrix <- table(Predicted = lda.class, Actual = actual_classes)
+#print(conf_matrix)
+theme_accuracies <- diag(conf_matrix) / rowSums(conf_matrix)
+theme_accuracies <- round(theme_accuracies * 100, 2)  # Convert to percentage
+print(theme_accuracies)
+```
+# Testing Words
+```{r}
+word_lm <- lm(word_might ~ `age/power dynamic_theme` + rebellion_theme + love_theme + `moving on_theme` + growth_theme + situationship_theme + partying_theme + heartbreak_theme + `mental health_theme` + jealousy_theme + religion_theme + hate_theme + unrequited_theme + crush_theme + revenge_theme + revenge_theme + empowerment_theme + happy_theme + grief_theme + exes_theme + reminiscing_theme + `toxic relationship_theme` + `growing up_theme` + `forbidden love_theme`, data = lyrics_combined)
+anova_result <- anova(word_lm)
+anova_summary <- broom::tidy(anova_result)
+# Filter only significant variables (p-value < 0.05)
+significant_results <- anova_summary %>%
+  arrange(p.value) %>%
+  filter(p.value < 0.0001) 
+# Display results
+print(significant_results)
+```
+# Feature Selection
+## Correlation Based Feature Selection
+```{r}
+X <- train_lc[,-c(1:24,7332)]
+Y <- train_lc$theme_as_factor
+```
+
+## Recursive Feature Elmination
+```{r}
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
+rfe_result <- rfe(X, Y, sizes = c(1:10), rfeControl = control)
+
+# Selected features
+X_selected <- X[, predictors(rfe_result)]
+```
+
+
+```{r}
+# Remove them
+X_filtered <- X[, -highly_correlated]
+```
+
+# Multi Log
+```{r}
+multi_log_model <- multinom(theme_as_factor ~ word_age+word_baby+word_back+word_bed+word_bitch+word_change+word_ever+word_eyes+word_fuck+word_girls+word_god+word_gone+word_hands+word_happy+word_home+word_kiss+word_love+word_night, 
+                            data = train_lc, trace = FALSE)
+multi_log_pred <- predict(multi_log_model)#, newdata = test_lc)
+# Calculate Accuracy
+accuracy <- mean(multi_log_pred == train_lc$theme_as_factor)
+print(paste("Multinomial Logistic Regression Accuracy:", round(accuracy * 100, 2), "%"))
+# Create Confusion Matrix
+conf_matrix <- table(Predicted = multi_log_pred, Actual = train_lc$theme_as_factor)
+# Compute Accuracy per Theme (Diagonal / Row Sum)
+theme_accuracies <- diag(conf_matrix) / rowSums(conf_matrix)
+theme_accuracies <- round(theme_accuracies * 100, 2)  # Convert to percentages
+# Print Theme-Wise Accuracy
+print(theme_accuracies)
+```
+

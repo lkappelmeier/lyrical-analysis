@@ -1,0 +1,614 @@
+---
+title: "LM Lyrics Model"
+output: html_document
+date: "2024-12-24"
+---
+# Load Libraries
+```{r}
+library(MASS)
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(caret)
+library(rsample)
+library(class)
+library(caret)
+```
+# Load Data
+```{r}
+# Read the file line by line
+lines <- readLines("lyran.csv", encoding = "UTF-8", warn = TRUE)
+
+# Convert encoding and filter invalid lines
+cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
+valid_lines <- cleaned_lines[!is.na(cleaned_lines)]
+
+# Write cleaned lines to a new file
+writeLines(valid_lines, "lyran_cleaned.csv")
+
+# Read the cleaned file
+lyrics_data <- read.csv("lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
+
+```
+# Stop Words
+```{r}
+# Define your custom stop words
+custom_stopwords <- c("ah", "im", "ohohoh", "oo", "uhhuh", "nooh", "s", "yearold", "thatll", "hadnt", "theyve", "imma", "aint", "will", "gonna", "hes", "put", "cant","youve", "youd", "ill", "lets", "can", "ive", "got", "wouldve", "thats", "theyre", "youll", "oh", "dont", "id", "cottontail", "said", "youre", "get", "ooh", "ooooh", "aaaaaaahhhhhh", "aah", "aahooh", "ac", "ahahahahah", "ahh", "ai", "im")
+# Combine custom stopwords with the default stop words
+all_stopwords <- c(stopwords("en"), custom_stopwords)
+corpus <- Corpus(VectorSource(lyrics_data$lyrics))
+```
+
+# Filter Data (Method 1)
+```{r}
+# Clean the corpus
+corpus_clean <- corpus %>%
+  tm_map(tolower) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, all_stopwords) %>%
+  tm_map(stripWhitespace)
+
+tidy_lyrics <- data.frame(
+  name = rep(lyrics_data$name, each = sapply(corpus_clean, length)),
+  artist = rep(lyrics_data$artist, each = sapply(corpus_clean, length)),
+  theme = rep(lyrics_data$theme, each = sapply(corpus_clean, length)),
+  text = sapply(corpus_clean, as.character),
+  row_id = seq_along(lyrics_data$name),  # Track the original row order
+  stringsAsFactors = FALSE
+)
+
+```
+
+# Clean and Filter Data (Method 2)
+```{r}
+# Step 1: Create a unique song-artist identifier
+lyrics_data <- tidy_lyrics %>%
+  mutate(song_artist_id = paste(name, artist, sep = "_")) %>%
+  dplyr::select(song_artist_id, theme, text)
+lyrics_data_0 <- lyrics_data
+```
+```{r}
+# Step 2: Unnest and Count Words
+lyrics_data_tokens_0 <- lyrics_data_0 %>% 
+  mutate(text = as.character(text)) %>% # Ensure text is character
+  unnest_tokens(output = word, input = text) %>% # Tokenize
+  group_by(song_artist_id, theme, word) %>% 
+  summarise(word_count = n(), .groups = "drop") # Count words
+lyrics_data_tokens_1 <- lyrics_data_tokens_0 %>%
+  mutate(word_indicator = case_when(
+    word_count <= 0 ~ 0,  # Word appears 4 or fewer times
+    word_count >= 1 ~ 1,  # Word appears 5 or more times
+    TRUE ~ NA_integer_  # For any other case (e.g., if word_count is NA or invalid)
+  ))
+# Step 3: Pivot Words using the word_indicator
+lyrics_data_wide_0 <- lyrics_data_tokens_1 %>%
+  pivot_wider(names_from = word, 
+              values_from = word_indicator,  # Use word_indicator instead of word_count
+              values_fill = 0,  # Fill missing values with 0
+              names_glue = "word_{word}",  # Custom column naming for words
+              names_repair = "unique")  # Make column names unique
+
+```
+
+
+```{r}
+# Step 2: Unnest
+lyrics_data_tokens <- lyrics_data %>% 
+  mutate(text = as.character(text)) %>% # Ensure text is character
+  unnest_tokens(output = word, input = text) %>% # Tokenize
+  group_by(song_artist_id, theme, word) %>% 
+  summarise(word_count = n(), .groups = "drop") # Count words
+
+# Step 3: Pivot Words
+lyrics_data_wide_0 <- lyrics_data_tokens_0 %>%
+  pivot_wider(names_from = word, 
+              values_from = word_count, 
+              values_fill = 0,
+              names_glue = "word_{word}")
+```
+
+
+```{r}
+# Step 4: Normalize word columns within each song
+lyrics_data_normalized <- lyrics_data_wide_0 %>%
+  mutate(across(
+    -c(song_artist_id, theme), # Exclude song_artist_id and theme
+    ~ . / pmax(rowSums(across(-c(song_artist_id, theme))), 1) # Normalize by row sums
+  ))
+  # Takes awhile but not too long. couple minutes
+lyrics_data_normalized_1 <- lyrics_data_normalized
+lyrics_data_normalized_0 <- lyrics_data_normalized_1 %>% 
+  mutate(theme_as_factor = factor(theme))
+```
+
+```{r}
+# Step 5: Pivot Theme
+
+
+lyrics_theme_binary_0 <- lyrics_data_tokens_0 %>%
+  group_by(song_artist_id, theme) %>%
+  summarise(theme_indicator = 1, .groups = "drop")
+
+# Pivot to create one-hot encoding for themes
+lyrics_theme_onehot <- lyrics_theme_binary_0 %>%
+  pivot_wider(
+    names_from = theme,
+    values_from = theme_indicator,
+    values_fill = 0,
+    names_glue = "{theme}_theme" # Custom column naming for themes
+  )
+
+
+lyrics_combined <- full_join(lyrics_theme_onehot, lyrics_data_normalized_0, by = join_by(song_artist_id)) %>% dplyr::select(!theme) #%>% mutate(word_love_squared = (1+word_love)^2)
+```
+# Filter
+```{r}
+lyrics_data_normalized_1 %>%
+  filter(theme == "religion") %>%  # Filter for the 'age/power dynamic' theme
+  pivot_longer(cols = -c(song_artist_id, theme), names_to = "word", values_to = "value") %>%  # Pivot to long format (exclude song_artist_id and theme columns)
+  filter(value > 0) %>%  # Only include rows where the word appears (value > 0)
+  group_by(song_artist_id, word) %>%
+  summarise(word_count_in_song = sum(value), .groups = "drop") %>%  # Count how many times the word appears in each unique song
+  group_by(word) %>%
+  summarise(
+    total_word_count = sum(word_count_in_song), # Total word occurrences across all songs
+    sd = sd(word_count_in_song),
+    unique_songs = n_distinct(song_artist_id),  # Number of unique songs the word appears in
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_word_count))  # Sort by total word count in descending order
+
+```
+# Theme Testing
+```{r}
+word_theme_counts <- lyrics_data_normalized %>%
+  pivot_longer(cols = -c(song_artist_id, theme), names_to = "word", values_to = "value") %>%  
+  filter(value > 0) %>%  
+  group_by(theme, song_artist_id, word) %>%
+  summarise(word_count_in_song = sum(value), .groups = "drop") %>%  
+  group_by(theme, word) %>%
+  summarise(
+    total_word_count = sum(word_count_in_song), 
+    sd = sd(word_count_in_song),
+    unique_songs = n_distinct(song_artist_id),  
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_word_count))  
+
+# Convert to dataframe
+word_theme_counts <- as.data.frame(word_theme_counts)
+word_counts <- word_theme_counts %>% dplyr::select(-theme) %>% group_by(word) %>% summarise(total_word_count = sum(total_word_count), unique_songs = sum(unique_songs))
+```
+
+```{r}
+gr_one <- lyrics_combined
+```
+
+```{r}
+word_lm <- lm(word_ex ~ `age/power dynamic_theme` + rebellion_theme + love_theme + `moving on_theme` + growth_theme + situationship_theme + partying_theme + heartbreak_theme + `mental health_theme` + jealousy_theme + religion_theme + hate_theme + unrequited_theme + crush_theme + revenge_theme + revenge_theme + empowerment_theme + happy_theme + grief_theme + exes_theme + reminiscing_theme + `toxic relationship_theme` + `growing up_theme` + `forbidden love_theme`, data = lyrics_combined)
+anova_result <- anova(word_lm)
+anova_summary <- broom::tidy(anova_result)
+# Filter only significant variables (p-value < 0.05)
+significant_results <- anova_summary %>%
+  filter(p.value < 0.01)
+# Display results
+print(significant_results)
+```
+
+
+
+
+# Training/Testing Subsets: lyrics_combined
+```{r}
+lc_size <- floor(0.55 * nrow(lyrics_combined))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind_lc <- sample(seq_len(nrow(lyrics_combined)), size = lc_size)
+
+train_lc <- lyrics_combined[train_ind_lc, ]
+test_lc <- lyrics_combined[-train_ind_lc, ]
+```
+# Training/Testing Subsets: lyrics_data_normalized
+```{r}
+ldn_size <- floor(0.55 * nrow(lyrics_data_normalized_0))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind_ldn <- sample(seq_len(nrow(lyrics_data_normalized_0)), size = ldn_size)
+
+train_ldn <- lyrics_data_normalized_0[train_ind_ldn, ]
+test_ldn <- lyrics_data_normalized_0[-train_ind_ldn, ]
+```
+
+
+# LDA
+
+```{r}
+lda.fit <- lda(theme_as_factor ~ 
+                word_afford + word_try+ word_young + word_really+ word_waiting + word_young + # Age/Power Dynamic
+                 word_mine + word_wanna + # Crush
+                 word_fire + word_feeling  + word_good + word_hair + word_walk +  # Empowerment
+                  # Exes
+                word_crime + # Forbidden Love 
+                 word_died + word_remember + # Grief
+                word_dancing + word_lie + word_know + word_much + word_long + # Growing Up
+                 word_must + word_always + word_give + word_fall + word_try + # Growth
+                 word_happy + word_life + word_yeah + word_place +  word_sun +# Happy
+                 word_hate + word_fuck + word_loved + word_worst + # Hate
+                 word_go + word_feelings + word_away + word_leave + word_end + # Heartbreak
+                word_way + # Jealousy
+                 word_love + word_like + word_now + word_head + # Love
+                word_time  + word_trying + word_going+ # Mental Health
+                 word_never + word_change + word_came + word_ever + word_new + word_gone + # Moving On
+                 word_want + word_party + word_spent + word_perfect + word_night + word_live + word_big + # Partying
+                word_propaganda + word_girls + # Rebellion
+                 word_believe + word_heaven + word_die + word_find + word_hands + word_die + word_tonight + # Religion
+                 word_back + word_tell +  word_home + word_first + word_miss + # Reminiscing
+                 word_karmas + word_revenge + word_cheats + word_red + word_karma + # Revenge
+                 word_one  + word_cool + word_drink + word_ground + word_read +  word_someone + # Situationship
+                 word_wanted + word_things + word_knew + word_wanted + word_cold + # Toxic Relationship
+                word_dreams + word_thought + word_better + word_lose + word_friend # Unrequited
+               , 
+               data = lyrics_data_normalized_0, subset = train_ind_ldn)
+#print(lda.fit)
+```
+```{r}
+lda.pred <- predict(lda.fit, newdata = test_ldn)
+lda.class <- lda.pred$class
+lda_matrix <- table(Predicted = lda.class, Actual = test_ldn$theme_as_factor)
+#print(lda_matrix)
+actual_classes <- test_ldn$theme_as_factor
+accuracy <- mean(lda.class == actual_classes)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+conf_matrix <- table(Predicted = lda.class, Actual = actual_classes)
+#print(conf_matrix)
+theme_accuracies <- diag(conf_matrix) / rowSums(conf_matrix)
+theme_accuracies <- round(theme_accuracies * 100, 2)  # Convert to percentage
+print(theme_accuracies)
+```
+
+
+
+# QDA
+```{r}
+qda.fit <- qda(theme_as_factor ~ word_love, data = lyrics_data_normalized_0, subset = train_ind_ldn)
+qda.pred <- predict(qda.fit, newdata = test_ldn)
+qda.class <- qda.pred$class
+qda_matrix <- table(Predicted = qda.class, Actual = test_ldn$theme_as_factor)
+qda_matrix
+```
+
+# Age/Power Dynamic
+```{r}
+apd_lm <- lm(`age/power dynamic_theme` ~ word_glass*word_age*word_older*word_young*word_creepy*word_attention*word_born*word_nineteen*word_nineteens*word_class*word_grown+word_look+word_kindly*word_bunny-word_born*word_class-word_age*word_attention-word_glass*word_grown-word_young*word_grown-word_grown, data = lyrics_combined)
+
+anova(apd_lm)
+#apd_lm
+
+apd_predict <- predict(apd_lm, newdata = lyrics_data_normalized)
+predictions_df <- lyrics_data_normalized %>% select(song_artist_id, theme) %>%
+  mutate(apd_predict = apd_predict)
+```
+
+# Love
+```{r}
+love_lm <- lm(love_theme ~ word_passion+word_freckle+ word_scene+word_feel+word_fuzzy+word_mushrooms+word_dandelions+ word_worry+word_darlin+word_anybody+word_head*word_bathroom+word_marry+ word_twinkling+word_country+word_paris+word_invisible+word_string+ word_like+word_beach+word_aristotle+word_willow+ word_heavy+word_kiss+word_princess+word_attached+ word_love+word_baby+word_kiss+word_mine+word_girl+word_diamond*word_rings-word_rings-word_bathroom, lyrics_combined)
+anova(love_lm)
+
+#love_lm
+love_predict <- predict(love_lm, newdata = lyrics_combined)
+```
+# Grief 
+```{r}
+grief_lm <- lm(grief_theme ~ word_ricochet+word_tears+word_divide+ word_death*word_gray+word_doc+word_terrible+word_sick*word_weeks+ word_dead+word_died+word_see+word_died+word_remember+word_see+word_away+word_wish+word_meet+word_live+word_died*word_see+word_away*word_wish+word_dead*word_meet+word_meet*word_live-word_see-word_wish-word_weeks, lyrics_combined)
+anova(grief_lm)
+grief_lm
+grief_predict <- predict(grief_lm, newdata = lyrics_combined)
+predictions_df <- predictions_df %>% 
+  mutate(grief_predict = grief_predict)
+```
+# Partying
+```{r}
+partying_lm <- lm(partying_theme ~ word_think*word_later+ word_hit*word_pints+word_pipe+word_club+word_dance+word_night + word_bar+ word_drink*word_fuck*word_club*word_partying*word_drinks*word_live-word_fuck*word_club-word_drink*word_drinks-word_live*word_drink-word_drinks*word_live-word_drink*word_drinks*word_live, lyrics_combined)
+anova(partying_lm)
+partying_predict <- predict(partying_lm, newdata = lyrics_combined)
+```
+# breakup
+```{r}
+breakup_lm <- lm(breakup_theme ~word_lifetime*word_behind+word_exile+word_signs+ word_breathing*word_stops+word_still*word_love+word_lonely*word_feelings+ word_breakup*word_closure*word_feelings*word_forgive*word_upset*word_number*word_sadness*word_sadness*word_cry*word_letter*word_trust+word_gone+word_forgive*word_lost+ word_gone + word_strangers-word_lost-word_cry-word_letter-word_trust-word_feelings*word_cry-word_love-word_lonely, lyrics_combined)
+anova(breakup_lm)
+#breakup_lm
+breakup_predict <- predict(breakup_lm, newdata = lyrics_combined)
+```
+# Crush
+```{r}
+crush_lm <- lm(crush_theme ~ word_cool*word_bloom+word_mastermind+word_summer+ word_show*word_extra*word_flirty+word_precious*word_honey+word_sweeten+ word_picture*word_mind+word_dream*word_party*word_kissin+word_neck*word_sucking+ word_midnight*word_bride*word_wife+word_lavender+word_dirty+word_turn+word_make*word_mine + word_man +word_sex+word_wine+word_closer+word_hand+word_lovers+word_body+word_babe+word_bar+word_cool+word_romance+word_alone+word_emotions+word_kissing-word_mine-word_make-word_midnight-word_dream-word_party-word_neck-word_wife-word_mind, lyrics_combined)
+anova(crush_lm)
+crush_predict <- predict(crush_lm, newdata = lyrics_combined)
+```
+# Empower
+```{r}
+empower_lm <- lm(empowerment_theme ~ word_good*word_hell+word_beautiful*word_pretty+word_fire+word_tiger*word_tiger+word_feelin+word_hair+word_survive+word_beauty+word_sexy+word_disrespectful+word_business*word_economy+word_supercharged+word_problem+word_fault*word_bitch+word_hotter+word_bejeweled+word_dumb+word_boy+word_bad+word_ignore-word_business-word_pretty-word_bitch-word_bad, lyrics_combined)
+anova(empower_lm)
+empower_predict <- predict(empower_lm, newdata = lyrics_combined)
+```
+# Exes
+```{r}
+exes_lm <- lm(exes_theme ~ word_curse+ word_exes*word_bad*word_idea*word_ex*word_back+word_weekend+word_ex*word_exlovers+word_exs+word_think*word_twice-word_think,lyrics_combined)
+anova(exes_lm)
+exes_predict <- predict(exes_lm, newdata = lyrics_combined)
+```
+# Forbidden Love
+```{r}
+forbidden_lm <- lm(`forbidden love_theme` ~ word_cursed*word_promised* word_spirit*word_dreamland+word_sober*word_ruin+word_find+ word_return+word_lie+ word_girlfriend*word_crime*word_bed*word_wound*word_illicit*word_affairs+word_lock+word_infidelity+word_know-word_bed + word_young*word_forever*word_secret-word_young-word_forever*word_secret, lyrics_combined)
+anova(forbidden_lm)
+forbidden_predict <- predict(forbidden_lm, newdata = lyrics_combined)
+```
+# Growing Up
+```{r}
+growing_lm <- lm(`growing up_theme` ~ word_long*word_longer+word_years+word_grandmas+ word_little*word_girl+ word_grade+word_lifes+ word_old*word_go*word_time*word_grow*word_fifteen*word_seven, lyrics_combined)
+anova(growing_lm)
+growing_predict <- predict(growing_lm, newdata = lyrics_combined)
+```
+# Growth
+```{r}
+growth_lm <- lm(growth_theme ~ word_wrong+word_pills*word_swallow+word_faster+word_repeating+word_better*word_track+ word_directions+ word_changing*word_people*word_grew*word_seasons*word_survived*word_advice+word_try*word_change-word_change, lyrics_combined)
+anova(growth_lm)
+growth_predict<- predict(growth_lm, newdata = lyrics_combined)
+```
+# Happy
+```{r}
+happy_lm <- lm(happy_theme ~ word_world*word_fantasy+word_together*word_amaze+word_trust*word_love*word_heart+word_sun+word_happy+word_life+word_good*word_morning*word_cash+word_cars+word_follow*word_dreams-word_follow-word_dreams-word_good-word_trust*word_love-word_love*word_heart-word_love-word_heart, lyrics_combined)
+anova(happy_lm)
+happy_predict <- predict(happy_lm, newdata = lyrics_combined)
+```
+# Hate
+```{r}
+hate_lm <- lm(hate_theme ~ word_consequences+word_wreck*word_whore+ word_fucking+word_letting+word_killin*word_fuckin+word_friend*word_mine+ word_smile*word_cry+word_hell+word_choke+word_conceited+word_dumb+ word_waste*word_time+ word_bad*word_blood+word_hate+word_bad+word_fuck+word_poison-word_friend-word_mine-word_cry-word_time-word_waste, lyrics_combined)
+anova(hate_lm)
+hate_predict <- predict(hate_lm, newdata = lyrics_combined)
+```
+# Heartbreak
+```{r}
+heartbreak_lm <- lm(heartbreak_theme ~ word_runaround+ word_broken*word_heart+word_airport*word_plane+word_someday+ word_hurt+word_sticks*word_stones+word_never*word_loved+ word_alone*word_apart+word_bad*word_crying+word_goodbye+ word_die*word_naked+word_desperate+word_bruisin+ word_alone*word_crying+word_maroon+word_pretend+word_fucking*word_sad+word_sorry+word_phone+word_shattered+word_pissed+word_hurt*word_smile+word_lost*word_cause+word_flowers+word_fool+word_shame*word_leave*word_disaster+word_leave*word_mistake-word_mistake-word_heart-word_break-word_sad-word_lost-word_cause-word_end*word_goodbye-word_smile-word_broke-word_heart*word_broke-word_fucking-word_die-word_naked, lyrics_combined)
+anova(heartbreak_lm)
+heartbreak_predict <- predict(heartbreak_lm, newdata = lyrics_combined)
+```
+# Jealousy
+```{r}
+jealousy_lm <- lm(jealousy_theme ~  word_reach+word_fuck*word_better+word_green+word_ex*word_killed+word_good*word_new+word_first*word_reused-word_first+word_need*word_want+word_whatever*word_girlfriend-word_want+word_petty+word_jealousy+word_take+word_love+word_jealous*word_fuck-word_love-word_fuck-word_better, lyrics_combined)
+anova(jealousy_lm)
+jealousy_predict <- predict(jealousy_lm, newdata = lyrics_combined)
+```
+# Mental Health
+```{r}
+mh_lm <- lm(`mental health_theme` ~ word_yearning+word_better*word_fall*word_back+word_sharp+ word_brain+word_mental+word_alive+word_leave*word_stay + word_loneliness + word_breathe +  word_bounce + word_pierce +  word_loner+word_overanalyze+word_pull*word_together+word_broken*word_heart+word_irrational+word_depression+word_mind*word_thoughts+word_trying*word_try*word_heart+word_mind*word_anxiety+word_trying*word_mirror-word_try-word_trying*word_heart-word_try*word_heart-word_together-word_leave-word_fall, lyrics_combined)
+anova(mh_lm)
+mh_predict <- predict(mh_lm, newdata = lyrics_combined)
+```
+# Moving On
+```{r}
+moving_on_lm <- lm(`moving on_theme` ~  word_peace*word_mind+word_never*word_back*word_together+ word_withers+word_awake+word_goddess+word_single+word_disappear+word_breathing+word_stranger+ word_forgot+word_rules+word_goodbye+word_months+word_new+ word_moving+ word_clean*word_change*word_waiting-word_clean*word_change-word_change*word_waiting+word_back*word_waiting+word_clean*word_back+word_begin*word_back+word_change*word_heart-word_heart-word_peace, lyrics_combined)
+anova(moving_on_lm)
+mo_predict <- predict(moving_on_lm, newdata = lyrics_combined)
+```
+# Rebellion
+```{r}
+rebel_lm <- lm(rebellion_theme ~ word_good*word_life+ word_american*word_dynasty+word_hell+word_ashes*word_dust+ word_message+word_stronger*word_child+word_bitch+ word_brick+word_propaganda+word_god+word_secular+word_police+word_shopping-word_good, lyrics_combined)
+anova(rebel_lm)
+rebel_predict <- predict(rebel_lm, newdata = lyrics_combined)
+```
+# Religion
+```{r}
+religion_lm <- lm(religion_theme ~word_nice*word_evangelicals* word_jesus*word_christ+word_kingdom*word_come+word_law+ word_believe+word_die+word_heaven+word_blood+word_atheist-word_come, lyrics_combined)
+anova(religion_lm)
+religion_predict <- predict(religion_lm, newdata = lyrics_combined)
+```
+# Reminiscing
+```{r}
+rem_lm <- lm(reminiscing_theme ~ word_stays+word_birthdays+word_wedding+word_grandma+word_mind+ word_stop+word_locket+word_weeds*word_wishes+word_phase+ word_remember*word_better+word_dream+ word_time*word_think*word_back+word_moment-word_time*word_think-word_remember-word_better, lyrics_combined)
+anova(rem_lm)
+rem_predict <- predict(rem_lm, newdata = lyrics_combined)
+```
+# Revenge
+```{r}
+revenge_lm <- lm(revenge_theme ~ word_red+word_games+word_cheats+ word_revenge*word_people*word_karma*word_karmas, lyrics_combined)
+anova(revenge_lm)
+revenge_predict <- predict(revenge_lm, newdata = lyrics_combined)
+```
+# Situationship
+```{r}
+situationship_lm <- lm(situationship_theme ~ word_stare*word_late+ word_pathetic+word_showtime+word_nonchalant+word_uncomplicated+word_grass*word_stains+word_baby*word_daddy+word_light*word_still+ word_kills+word_just+word_gemini+word_chill+word_fun+word_midnight+word_cardigan+word_cool+word_grinding+word_stages+word_august+word_someone*word_new+ word_lonely*word_wish+word_go*word_casual+word_go*word_wait+word_leave-word_lonely-word_wish-word_go-word_wait-word_wish*word_go-word_daddy-word_late-word_still, lyrics_combined)
+anova(situationship_lm)
+situationship_predict <- predict(situationship_lm, newdata = lyrics_combined)
+```
+# Unrequited
+```{r}
+unrequited_lm <- lm(unrequited_theme ~ word_allowed*word_apart*word_far+word_flush+word_anticipating+ word_better*word_late*word_never+word_needs+ word_happier+word_olivia+word_woman+word_jessies+ word_eugene+word_dignity+word_altar+word_beautiful*word_girls+word_spaceman*word_happier+ word_harbor+word_blue+word_linger+word_waiting*word_room+ word_friend+word_shes+word_dreams+word_falling+word_unrequited+word_friend*word_mind+word_friend*word_kiss-word_kiss-word_waiting-word_room-word_girls-word_far*word_apart, lyrics_combined)
+anova(unrequited_lm)
+unreq_predict <- predict(unrequited_lm, newdata = lyrics_combined)
+```
+# Toxic Relationship
+```{r}
+toxic_lm <- lm(`toxic relationship_theme` ~ word_scars+word_danger*word_cascade*word_tolerate*word_trouble*word_maniac*word_ruin*word_cold*word_goddamn*word_changed*word_complex-word_goddamn*word_complex+word_goddamn+word_complex-word_secret*word_ruin+word_ruin, lyrics_combined)
+anova(toxic_lm)
+toxic_predict <- predict(toxic_lm, newdata = lyrics_combined)
+```
+
+```{r}
+theme_mapping <- c(
+  "numeric_apd_predict" = "age/power dynamic",
+  "numeric_breakup_predict" = "breakup",
+  "numeric_love_predict" = "love",
+  "numeric_grief_predict" = "grief",
+  "numeric_partying_predict" = "partying",
+  "numeric_exes_predict" = "exes",
+  "numeric_crush_predict" = "crush",
+  "numeric_empower_predict" = "empowerment",
+  "numeric_forbidden_predict" = "forbidden love",
+  "numeric_growing_predict" = "growing up",
+  "numeric_growth_predict" = "growth",
+  "numeric_happy_predict" = "happy",
+  "numeric_heartbreak_predict" = "heartbreak",
+  "numeric_hate_predict" = "hate",
+  "numeric_jealousy_predict" = "jealousy",
+  "numeric_mh_predict" = "mental health",
+  "numeric_mo_predict" = "moving on",
+  "numeric_rebel_predict" = "rebellion",
+  "numeric_religion_predict" = "religion",
+  "numeric_rem_predict" = "reminiscing",
+  "numeric_revenge_predict" = "revenge",
+  "numeric_situationship_predict" = "situationship",
+  "numeric_unreq_predict" = "unrequited",
+  "numeric_toxic_predict" = "toxic relationship"
+)
+```
+
+
+```{r}
+predictions_df <- lyrics_data_normalized %>% select(song_artist_id, theme) %>%
+  mutate(toxic_predict = toxic_predict,
+         religion_predict = religion_predict,
+         rebel_predict = rebel_predict,
+         mo_predict = mo_predict,
+         mh_predict = mh_predict,
+         jealousy_predict = jealousy_predict,
+         heartbreak_predict = heartbreak_predict,
+         hate_predict = hate_predict,
+         happy_predict = happy_predict,
+         growth_predict = growth_predict,
+         growing_predict = growing_predict,
+         forbidden_predict = forbidden_predict,
+         empower_predict = empower_predict,
+         crush_predict = crush_predict,
+         exes_predict = exes_predict,
+         apd_predict = apd_predict,
+         love_predict = love_predict,
+         grief_predict = grief_predict,
+         partying_predict = partying_predict,
+         rem_predict = rem_predict,
+         revenge_predict = revenge_predict,
+         situationship_predict = situationship_predict,
+         unreq_predict = unreq_predict)
+
+predictions_df <- predictions_df %>%
+  # Ensure prediction columns are numeric (if they are not already)
+  mutate(across(ends_with("_predict"), ~ as.numeric(.), .names = "numeric_{.col}")) %>%
+  # Create the max_pred_column by finding the column with the max value in each row
+  mutate(max_pred_column = apply(select(., starts_with("numeric_")), 1, function(x) {
+    colnames(select(., starts_with("numeric_")))[which.max(x)]
+  })) %>%
+  # Map max_pred_column to human-readable themes
+  mutate(max_theme = theme_mapping[max_pred_column]) %>%
+  # Remove the temporary numeric columns
+  select(-starts_with("numeric_")) %>%
+  mutate(correct = theme==max_theme)
+
+```
+
+
+
+
+```{r}
+lm_accuracy_count <- predictions_df %>% group_by(correct) %>% summarise(n = n())
+lm_accuracy_percent <- lm_accuracy_count$n[2]/(lm_accuracy_count$n[1]+ lm_accuracy_count$n[2])
+lm_accuracy_percent
+predictions_df %>% group_by(theme, correct)  %>% summarise(n = n())
+```
+
+# Testing/Training with Logistic
+## Testing and Training
+```{r}
+lc_size_log <- floor(0.75 * nrow(lyrics_combined))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind_lc_log <- sample(seq_len(nrow(lyrics_combined)), size = lc_size_log)
+
+log_train <- lyrics_combined[train_ind_lc_log, ]
+log_test <- lyrics_combined[-train_ind_lc_log,]
+normalized_train <- lyrics_data_normalized_1[train_ind_lc_log,]
+```
+```{r}
+normalized_train %>%
+  filter(theme == "empowerment") %>%  # Filter for the 'age/power dynamic' theme
+  pivot_longer(cols = -c(song_artist_id, theme), names_to = "word", values_to = "value") %>%  # Pivot to long format (exclude song_artist_id and theme columns)
+  filter(value > 0) %>%  # Only include rows where the word appears (value > 0)
+  group_by(song_artist_id, word) %>%
+  summarise(word_count_in_song = sum(value), .groups = "drop") %>%  # Count how many times the word appears in each unique song
+  group_by(word) %>%
+  summarise(
+    total_word_count = sum(word_count_in_song), # Total word occurrences across all songs
+    sd = sd(word_count_in_song),
+    unique_songs = n_distinct(song_artist_id),  # Number of unique songs the word appears in
+    .groups = "drop"
+  ) %>%
+  arrange(desc(unique_songs))  # Sort by total word count in descending order
+
+```
+
+
+## Age/Power Dynamic
+```{r}
+apd_logit <- glm(`age/power dynamic_theme` ~ word_baby+word_born+word_age+word_attention, data = log_train, family = "binomial")
+summary(apd_logit)
+apd_probs <- predict(apd_logit, type = "response", newdata = lyrics_combined)
+```
+## Crush
+```{r}
+crush_logit <- glm(`crush_theme` ~ word_wanna+word_move+word_nobody+word_around+word_body+word_care+word_closer+word_cool, data = log_train, family = "binomial")
+summary(crush_logit)
+crush_probs <- predict(crush_logit, type = "response", newdata = lyrics_combined)
+```
+## Empower
+```{r}
+emp_logit <- glm(`empowerment_theme` ~ word_good+word_best+word_boy+word_walk+word_girls+word_shit+word_tell+word_hey+word_time+word_tonight+word_wont+word_fire, data = log_train, family = "binomial")
+summary(emp_logit)
+emp_probs <- predict(emp_logit, type = "response", newdata = lyrics_combined)
+```
+
+## Prediction df
+```{r}
+predictions_df_0 <- lyrics_data_normalized_0 %>% select(song_artist_id, theme) %>%
+  mutate(toxic_predict = toxic_predict,
+         religion_predict = religion_predict,
+         rebel_predict = rebel_predict,
+         mo_predict = mo_predict,
+         mh_predict = mh_predict,
+         jealousy_predict = jealousy_predict,
+         heartbreak_predict = heartbreak_predict,
+         hate_predict = hate_predict,
+         happy_predict = happy_predict,
+         growth_predict = growth_predict,
+         growing_predict = growing_predict,
+         forbidden_predict = forbidden_predict,
+         empower_predict = empower_predict,
+         crush_predict = crush_probs,
+         exes_predict = exes_predict,
+         apd_predict = apd_probs,
+         love_predict = love_predict,
+         grief_predict = grief_predict,
+         partying_predict = partying_predict,
+         rem_predict = rem_predict,
+         revenge_predict = revenge_predict,
+         situationship_predict = situationship_predict,
+         unreq_predict = unreq_predict)
+
+predictions_df_0 <- predictions_df_0 %>%
+  # Ensure prediction columns are numeric (if they are not already)
+  mutate(across(ends_with("_predict"), ~ as.numeric(.), .names = "numeric_{.col}")) %>%
+  # Create the max_pred_column by finding the column with the max value in each row
+  mutate(max_pred_column = apply(select(., starts_with("numeric_")), 1, function(x) {
+    colnames(select(., starts_with("numeric_")))[which.max(x)]
+  })) %>%
+  # Map max_pred_column to human-readable themes
+  mutate(max_theme = theme_mapping[max_pred_column]) %>%
+  # Remove the temporary numeric columns
+  select(-starts_with("numeric_")) %>%
+  mutate(correct = theme==max_theme)
+
+```
+
+
