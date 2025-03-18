@@ -10,7 +10,9 @@ library(tm)
 library(MASS)
 library(nnet)
 library(tidyverse)
+library(tidyr)
 library(caret)
+library(tidytext)
 ```
 # Load Data
 ```{r}
@@ -171,7 +173,7 @@ print(theme_accuracies)
 ```
 # Testing Words
 ```{r}
-word_lm <- lm(word_might ~ `age/power dynamic_theme` + rebellion_theme + love_theme + `moving on_theme` + growth_theme + situationship_theme + partying_theme + heartbreak_theme + `mental health_theme` + jealousy_theme + religion_theme + hate_theme + unrequited_theme + crush_theme + revenge_theme + revenge_theme + empowerment_theme + happy_theme + grief_theme + exes_theme + reminiscing_theme + `toxic relationship_theme` + `growing up_theme` + `forbidden love_theme`, data = lyrics_combined)
+word_lm <- lm(word_yeah ~ `age/power dynamic_theme` + rebellion_theme + love_theme + `moving on_theme` + growth_theme + situationship_theme + partying_theme + heartbreak_theme + `mental health_theme` + jealousy_theme + religion_theme + hate_theme + unrequited_theme + crush_theme + revenge_theme + revenge_theme + empowerment_theme + happy_theme + grief_theme + exes_theme + reminiscing_theme + `toxic relationship_theme` + `growing up_theme` + `forbidden love_theme`, data = lyrics_combined)
 anova_result <- anova(word_lm)
 anova_summary <- broom::tidy(anova_result)
 # Filter only significant variables (p-value < 0.05)
@@ -205,7 +207,8 @@ X_filtered <- X[, -highly_correlated]
 
 # Multi Log
 ```{r}
-multi_log_model <- multinom(theme_as_factor ~ word_age+word_baby+word_back+word_bed+word_bitch+word_change+word_ever+word_eyes+word_fuck+word_girls+word_god+word_gone+word_hands+word_happy+word_home+word_kiss+word_love+word_night, 
+multi_log_model <- multinom(theme_as_factor ~ word_love + word_baby + 
+    word_yeah + word_still + word_never, 
                             data = train_lc, trace = FALSE)
 multi_log_pred <- predict(multi_log_model)#, newdata = test_lc)
 # Calculate Accuracy
@@ -218,5 +221,23 @@ theme_accuracies <- diag(conf_matrix) / rowSums(conf_matrix)
 theme_accuracies <- round(theme_accuracies * 100, 2)  # Convert to percentages
 # Print Theme-Wise Accuracy
 print(theme_accuracies)
+```
+```{r}
+# Calculate column sums
+word_sums <- colSums(train_lc[, grepl("^word_", colnames(train_lc))])
+
+# Select columns where sum is at least 2
+selected_words <- names(word_sums[word_sums >= 35])
+
+# Subset dataset with only selected word features + target variable
+train_lc_filtered <- train_lc[, c("theme_as_factor", selected_words)]
+```
+
+
+```{r}
+full_model <- multinom(theme_as_factor ~ ., data = train_lc_filtered, trace = FALSE)
+step_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
+
+summary(step_model)  # View selected variables
 ```
 
