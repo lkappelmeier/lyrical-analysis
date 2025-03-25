@@ -1,6 +1,8 @@
 ---
 title: "Lyrical Analysis"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 date: "2025-03-15"
 --- 
 # Load Libraries 
@@ -186,23 +188,23 @@ print(significant_results)
 # Feature Selection
 ## Correlation Based Feature Selection
 ```{r}
-X <- train_lc[,-c(1:24,7332)]
-Y <- train_lc$theme_as_factor
+#X <- train_lc[,-c(1:24,7332)]
+#Y <- train_lc$theme_as_factor
 ```
 
 ## Recursive Feature Elmination
 ```{r}
-control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
-rfe_result <- rfe(X, Y, sizes = c(1:10), rfeControl = control)
+#control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
+#rfe_result <- rfe(X, Y, sizes = c(1:10), rfeControl = control)
 
 # Selected features
-X_selected <- X[, predictors(rfe_result)]
+#X_selected <- X[, predictors(rfe_result)]
 ```
 
 
 ```{r}
 # Remove them
-X_filtered <- X[, -highly_correlated]
+#X_filtered <- X[, -highly_correlated]
 ```
 
 # Multi Log
@@ -235,9 +237,9 @@ train_lc_filtered <- train_lc[, c("theme_as_factor", selected_words)]
 
 
 ```{r}
-full_model <- multinom(theme_as_factor ~ ., data = train_lc_filtered, trace = FALSE)
-step_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
+#full_model <- multinom(theme_as_factor ~ ., data = train_lc_filtered, trace = FALSE)
+#step_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
 
-summary(step_model)  # View selected variables
+#summary(step_model)  # View selected variables
 ```
 
