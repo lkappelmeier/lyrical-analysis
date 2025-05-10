@@ -15,6 +15,7 @@ library(tidyverse)
 library(tidyr)
 library(caret)
 library(tidytext)
+library(olsrr)
 ```
 # Load Data
 ```{r}
@@ -58,7 +59,7 @@ tidy_lyrics <- data.frame(
 ```{r}
 # Make Unique Song_Artist_Id
 lyrics_data <- tidy_lyrics %>%
-  mutate(song_artist_id = paste(name, artist, sep = "_")) %>%
+  mutate(song_artist_id = paste(name, artist, sep = " ")) %>%
   dplyr::select(song_artist_id, theme, text)
 ```
 # Count Words
@@ -241,5 +242,68 @@ train_lc_filtered <- train_lc[, c("theme_as_factor", selected_words)]
 #step_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
 
 #summary(step_model)  # View selected variables
+```
+
+
+```{r}
+df_metrics <- read_csv("~/Desktop/SDS 293 Data (Copy of MTH 354) /Machine Learning/MTH 354 Work.csv")
+```
+```{r}
+df <- left_join(lyrics_combined, df_metrics, by = join_by(song_artist_id == name_artist), keep = TRUE) 
+# df3[complete.cases(df3),]
+df <- df[complete.cases(df),]
+df_num_syd <- df %>% select(!c(`...1`, Artist_Simplified, Song, Genre_Simplified, Unknown, Becca, Cathy, Emily, Lara, Lauren, Lily, Sorel, Melissa, Tyler, Kristin, Lindsey, song_artist_id))
+
+df_num_syd <- df_num_syd %>% 
+  select(where(is.numeric)) %>% 
+  select(where(~sum(.) > 25))
+```
+
+```{r}
+sydney <- lm(Sydney ~ ., df_num_syd) 
+# stepwise forward regression
+syd_forward_var <- ols_step_forward_p(sydney)
+syd_forward_var
+plot(syd_forward_var)
+```
+
+
+```{r}
+syd_forward_lm <- lm(Sydney ~ Dates_New + Popularity + Acoustic + unrequited_theme + word_never + word_know + Energy + word_go + word_like + word_make + Happy + word_take + word_wanna, df_num_syd)
+syd_forward_lm
+anova(syd_forward_lm)
+```
+
+
+```{r, eval = FALSE, echo = FALSE}
+ggplot(df_num_syd, aes(x = Dates_New, y = Sydney)) + 
+  geom_point(aes(x = Dates_New, y = Sydney), color = "red") +
+  geom_point(aes(x = Dates_New, y = Sydney), color = "orange") + 
+  geom_point(aes(x = Acoustic, y = Sydney), color = "yellow") +
+  geom_smooth(aes(x = Dates_New, y = Sydney), color = "red") +
+  geom_smooth(aes(x = Popularity, y = Sydney), color = "orange") + 
+  geom_smooth(aes(x = Acoustic, y = Sydney), color = "yellow") +
+  geom_smooth(aes(x = word_never, y = Sydney), color = "green") 
+```
+```{r}
+# stepwise backward regression
+syd_backward_var <- ols_step_backward_p(sydney)
+syd_backward_var
+plot(syd_backward_var)
+```
+```{r}
+syd_backward_lm <- lm(Sydney ~ unrequited_theme, data = df_num_syd)
+syd_backward_lm
+df_pred_syd <- predict(syd_backward_lm, newdata = df_num_syd) 
+df_pred_syd <- df_num_syd %>% mutate(pred = df_pred_syd)
+# First, make sure you have row identifiers to join by
+df_pred_syd$song_index <- rownames(df)
+df$song_index <- rownames(df)  # assumes rows were not reordered between df and df_num_syd
+
+# Now join the predictions back to the original df
+df_with_songs <- left_join(df_pred_syd, df, by = "song_index")
+df_with_songs <- df_with_songs %>% select(Song, Artist_Simplified, theme_as_factor, Genre_Simplified, Sydney.x, pred)
+
+anova(syd_backward_lm)
 ```
 
