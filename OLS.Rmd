@@ -18,12 +18,12 @@ df <- df %>% drop_na()
 ## Themes
 ```{r}
 theme_vars <- c(
-  "age_power_dynamic_theme", "crush_theme", "empowerment_theme", "exes_theme", "forbidden love_theme", 
-  "grief_theme", "growing up_theme", "growth_theme", "happy_theme", "hate_theme", 
-  "heartbreak_theme", "jealousy_theme", "love_theme", "mental health_theme", 
-  "moving on_theme", "partying_theme", "rebellion_theme", "religion_theme", 
+  "age_power_dynamic_theme", "crush_theme", "empowerment_theme", "exes_theme", "forbidden_love_theme", 
+  "grief_theme", "growing_up_theme", "growth_theme", "happy_theme", "hate_theme", 
+  "heartbreak_theme", "jealousy_theme", "love_theme", "mental_health_theme", 
+  "moving_on_theme", "partying_theme", "rebellion_theme", "religion_theme", 
   "reminiscing_theme", "revenge_theme", "situationship_theme", 
-  "toxic relationship_theme", "unrequited_theme"
+  "toxic_relationship_theme", "unrequited_theme"
 )
 
 theme_words <- gsub( "_theme",theme_vars, replacement = "")
@@ -51,7 +51,7 @@ names(df)[names(df) == "moving on_theme"] <- "moving_on_theme"
 
 df$theme_as_factor[df$theme_as_factor=="moving on_theme"] <- "moving_on_theme"
 
-names(df)[names(df) == "toxic relationship"] <- "toxic_relationship_theme"
+names(df)[names(df) == "toxic relationship_theme"] <- "toxic_relationship_theme"
 
 df$theme_as_factor[df$theme_as_factor=="toxic relationship_theme"] <- "toxic_relationship_theme"
 
@@ -61,10 +61,10 @@ df_no_theme <- df[,-c(1,2)] %>%
   dplyr::select(where(~sum(.) > 14))
 
 df_pred <- df %>% dplyr::select(c(song_artist_id, theme_as_factor))
+```
 
 
-
-
+```{r}
 df_apd <- df_no_theme %>% 
   mutate(age_power_dynamic_theme = df$age_power_dynamic_theme)
 
@@ -112,6 +112,27 @@ df_moving_on <- df_no_theme %>%
 
 df_partying <- df_no_theme %>%
   mutate(partying_theme = df$partying_theme)
+
+df_rebellion <- df_no_theme %>%
+  mutate(rebellion_theme = df$rebellion_theme)
+
+df_religion <- df_no_theme %>%
+  mutate(religion_theme = df$religion_theme)
+
+df_reminiscing <- df_no_theme %>%
+  mutate(reminiscing_theme = df$reminiscing_theme)
+
+df_revenge <- df_no_theme %>%
+  mutate(revenge_theme = df$revenge_theme)
+
+df_situationship <- df_no_theme %>%
+  mutate(situationship_theme = df$situationship_theme)
+
+df_toxic_relationship <- df_no_theme %>%
+  mutate(toxic_relationship_theme = df$toxic_relationship_theme)
+
+df_unrequited <- df_no_theme %>%
+  mutate(unrequited_theme = df$unrequited_theme)
 ```
 
 # Age/Power Dynamic
@@ -124,22 +145,27 @@ summary(apd$model)$coefficients %>%
   arrange(`Pr(>|t|)`)
 ```
 ```{r}
-apd_lin <- lm(age_power_dynamic_theme ~ word_bad + word_never + word_hard + word_let + word_didnt + word_cause + word_little + word_new + word_better + word_look, data = df_apd)
-#anova(apd_lin)
+apd_lin <- lm(age_power_dynamic_theme ~ word_bad + word_never + word_hard + word_let + word_cause + word_little + word_look + word_just + Live + word_baby, data = df_apd)
+anova(apd_lin)
 df_pred <- df_pred %>% mutate(age_power_dynamic_theme_score = predict(apd_lin, newdata = df_apd))
 ```
 # Crush
 ```{r}
 crush <- lm(crush_theme ~ ., data = df_crush)
 crush <- ols_step_backward_r2(crush)
+```
+
+
+```{r}
 summary(crush$model)$coefficients %>%
   as.data.frame() %>%
   tibble::rownames_to_column("variable") %>%
-  arrange(`Pr(>|t|)`)
+  arrange(`Estimate`)
 ```
 ```{r}
-crush_lin <- lm(crush_theme ~ word_baby + word_end + word_come + word_much + Happy + word_just + word_way + Acoustic + word_better + word_really, data = df_crush)
+crush_lin <- lm(crush_theme ~ word_baby + word_end + word_come + Happy + word_just + word_way + Acoustic  + Loud + word_much + word_hard, data = df_crush)
 df_pred <- df_pred %>% mutate(crush_theme_score = predict(crush_lin, newdata = df_crush))
+anova(crush_lin)
 ```
 
 # Empowerment
@@ -354,7 +380,135 @@ moving_on_lin <- lm(moving_on_theme ~ word_new + word_leave + word_never + word_
 anova(moving_on_lin)
 df_pred <- df_pred %>% mutate(moving_on_theme = predict(moving_on_lin, newdata = df_moving_on))
 ```
+# Partying
 
+```{r}
+partying <- lm(partying_theme ~ ., data = df_partying)
+partying <- ols_step_backward_r2(partying)
+summary(partying$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+partying_lin <- lm(partying_theme ~ word_night+word_come+word_say+Loud+word_maybe+word_well+word_hard+word_told, data = df_partying)
+anova(partying_lin)
+df_pred <- df_pred %>% mutate(partying_theme = predict(partying_lin, newdata = df_partying))
+```
+
+# Rebellion
+
+```{r}
+rebellion <- lm(rebellion_theme ~ ., data = df_rebellion)
+rebellion <- ols_step_backward_r2(rebellion)
+summary(rebellion$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+rebellion_lin <- lm(rebellion_theme ~ word_know + word_never +  word_night + Rock + word_good + word_heart + word_first + Happy, data = df_rebellion)
+anova(rebellion_lin)
+df_pred <- df_pred %>% mutate(rebellion_theme = predict(rebellion_lin, newdata = df_rebellion))
+```
+
+# Religion
+
+```{r}
+religion <- lm(religion_theme ~ ., data = df_religion)
+religion <- ols_step_backward_r2(religion)
+summary(religion$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+religion_lin <- lm(religion_theme ~ word_believe + word_alone + word_yeah + word_look + Rock + word_take + word_trying + word_turn + word_day, data = df_religion)
+anova(religion_lin)
+df_pred <- df_pred %>% mutate(religion_theme = predict(religion_lin, newdata = df_religion))
+```
+# Reminiscing
+
+```{r}
+reminiscing <- lm(reminiscing_theme ~ ., data = df_reminiscing)
+reminiscing <- ols_step_backward_r2(reminiscing)
+summary(reminiscing$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+reminiscing_lin <- lm(reminiscing_theme ~ Folk + word_home + word_hold + word_keep + word_now  + word_thought+word_stay + word_face, data = df_reminiscing)
+anova(reminiscing_lin)
+df_pred <- df_pred %>% mutate(reminiscing_theme = predict(reminiscing_lin, newdata = df_reminiscing))
+```
+# Revenge
+```{r}
+revenge <- lm(revenge_theme ~ ., data = df_revenge)
+revenge <- ols_step_backward_r2(revenge)
+summary(revenge$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+revenge_lin <- lm(revenge_theme ~ word_little + word_back + word_baby + word_friends + word_around + word_every + word_cause + word_day + word_mine + word_first, data = df_revenge)
+anova(revenge_lin)
+df_pred <- df_pred %>% mutate(revenge_theme = predict(revenge_lin, newdata = df_revenge))
+```
+# Situationship
+
+```{r}
+situationship <- lm(situationship_theme ~ ., data = df_situationship)
+situationship <- ols_step_backward_r2(situationship)
+summary(situationship$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+situationship_lin <- lm(situationship_theme ~ word_much + word_one + word_hold + word_baby + word_friends + word_call + word_right + Happy + word_let + word_care, data = df_situationship)
+anova(situationship_lin)
+#df_pred <- df_pred %>% mutate(situ_theme = predict(moving_on_lin, newdata = df_moving_on))
+```
+# Toxic Relationship
+```{r}
+toxic_relationship <- lm(toxic_relationship_theme ~ ., data = df_toxic_relationship)
+toxic_relationship <- ols_step_backward_r2(toxic_relationship)
+summary(toxic_relationship$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+toxic_relationship_lin <- lm(toxic_relationship_theme ~ word_believe + word_every + word_go + word_night + word_trying + word_nothing + word_day, data = df_toxic_relationship)
+anova(toxic_relationship_lin)
+df_pred <- df_pred %>% mutate(toxic_relationship_theme = predict(toxic_relationship_lin, newdata = df_toxic_relationship))
+```
+
+# Unrequited
+
+```{r}
+unrequited <- lm(unrequited_theme ~ ., data = df_unrequited)
+unrequited <- ols_step_backward_r2(unrequited)
+summary(unrequited$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Pr(>|t|)`)
+```
+
+```{r}
+unrequited_lin <- lm(unrequited_theme ~ word_look + word_better + word_let + Popularity + Loud + word_eyes, data = df_unrequited)
+anova(unrequited_lin)
+#df_pred <- df_pred %>% mutate(unreq = predict(moving_on_lin, newdata = df_moving_on))
+```
 ```{r}
 df_pred <- df %>%
   dplyr::select(song_artist_id, theme_as_factor) %>%
@@ -373,34 +527,33 @@ df_pred <- df %>%
     jealousy_theme          = predict(jealousy_lin, newdata = df_jealousy),
     love_theme              = predict(love_lin, newdata = df_love),
     mental_health_theme = predict(mental_health_lin, newdata = df_mental_health),
-    moving_on_theme = predict(moving_on_lin, newdata = df_moving_on)
-    )
-```
-
-
-```{r}
-df_pred <- df_pred %>%
+    moving_on_theme = predict(moving_on_lin, newdata = df_moving_on),
+    partying_theme = predict(partying_lin, newdata = df_partying),
+    rebellion_theme = predict(rebellion_lin, newdata = df_rebellion),
+    religion_theme = predict(religion_lin, newdata = df_religion),
+    reminiscing_theme = predict(reminiscing_lin, newdata = df_reminiscing),
+    revenge_theme = predict(revenge_lin, newdata = df_revenge),
+    situationship_theme = predict(situationship_lin, newdata = df_situationship),
+    toxic_relationship_theme = predict(toxic_relationship_lin, newdata = df_toxic_relationship),
+    unrequited_theme = predict(unrequited_lin, newdata = df_unrequited)
+    ) %>%
   rowwise() %>%
   mutate(
-    predicted_theme = theme_words[which.max(c_across(all_of(theme_words)))]
+    predicted_theme = theme_words[which.max(c_across(all_of(theme_vars)))]
   ) %>%
   ungroup()
-
 ```
 
+```{r}
+df_pred$theme_as_factor <- gsub(" ", df_pred$theme_as_factor, replacement = "_" )
+
+df_pred <- df_pred %>%
+  mutate(match = theme_as_factor == predicted_theme)
+```
 
 ```{r}
-,
-    exes_theme              = predict(exes_model, newdata = df_exes),
-    `forbidden love_theme`  = predict(forbidden_model, newdata = df_forbidden_love),
-    grief_theme             = predict(grief_model, newdata = df_grief),
-    `growing up_theme`      = predict(growing_model, newdata = df_growing_up),
-    growth_theme            = predict(growth_model, newdata = df_growth),
-    happy_theme             = predict(happy_model, newdata = df_happy),
-    hate_theme              = predict(hate_model, newdata = df_hate),
-    heartbreak_theme        = predict(heartbreak_model, newdata = df_heartbreak),
-    jealousy_theme          = predict(jealousy_model, newdata = df_jealousy),
-    love_theme              = predict(love_model, newdata = df_love)
-  )
+df_pred %>%
+  group_by(theme_as_factor) %>%
+  summarise(correct = sum(match), total = n(), accuracy = mean(match)) %>% arrange((accuracy))
 ```
 
