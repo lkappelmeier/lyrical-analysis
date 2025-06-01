@@ -58,7 +58,7 @@ df$theme_as_factor[df$theme_as_factor=="toxic relationship_theme"] <- "toxic_rel
 df_no_theme <- df[,-c(1,2)] %>% 
   dplyr::select(-c(any_of(theme_vars), Unknown, Emily, Lauren, Sorel, Sydney, Cathy, `...7334`)) %>% 
   select(where(is.numeric)) %>%
-  dplyr::select(where(~sum(.) > 14))
+  dplyr::select(where(~sum(.) > 7.5))
 
 df_pred <- df %>% dplyr::select(c(song_artist_id, theme_as_factor))
 ```
@@ -160,10 +160,10 @@ crush <- ols_step_backward_r2(crush)
 summary(crush$model)$coefficients %>%
   as.data.frame() %>%
   tibble::rownames_to_column("variable") %>%
-  arrange(`Estimate`)
+  arrange(`Pr(>|t|)`)
 ```
 ```{r}
-crush_lin <- lm(crush_theme ~ word_baby + word_end + word_come + Happy + word_just + word_way + Acoustic  + Loud + word_much + word_hard, data = df_crush)
+crush_lin <- lm(crush_theme ~ word_baby + word_end + word_come + Happy + word_just + word_way + Acoustic  + Loud + word_much + word_hard + word_better + word_hard, data = df_crush)
 df_pred <- df_pred %>% mutate(crush_theme_score = predict(crush_lin, newdata = df_crush))
 anova(crush_lin)
 ```
@@ -228,10 +228,15 @@ summary(grief$model)$coefficients %>%
   as.data.frame() %>%
   tibble::rownames_to_column("variable") %>%
   arrange(`Pr(>|t|)`)
+summary(grief$model)$coefficients %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("variable") %>%
+  arrange(`Estimate`)
 ```
 
 ```{r}
-grief_lin <- lm(grief_theme ~ word_love + word_enough + word_mind + word_bed + word_still + word_didnt + Happy + word_well + word_home + word_tell, data = df_grief)
+grief_lin <- lm(grief_theme ~ word_love+word_enough+word_still+word_didnt*Happy+word_sky + word_high+word_left  + word_meet+word_saw + word_live+`Alternative/Indie`+word_without, data = df_grief)
+grief_lin
 anova(grief_lin)
 df_pred <- df_pred %>% mutate(grief_theme_score = predict(grief_lin, newdata = df_grief))
 ```
@@ -246,7 +251,7 @@ summary(growing_up$model)$coefficients %>%
 ```
 
 ```{r}
-growing_up_lin <- lm(growing_up_theme ~ word_see + word_long + word_hold + word_day + word_much + word_call + word_now + word_time + Pop + word_didnt, data = df_growing_up)
+growing_up_lin <- lm(growing_up_theme ~ word_see + word_long + word_hold + word_day  + word_call + word_now + word_time + word_times + word_name + word_house + word_old +word_day, data = df_growing_up)
 anova(growing_up_lin)
 df_pred <- df_pred %>% mutate(growing_up_theme_score = predict(growing_up_lin, newdata = df_growing_up))
 ```
@@ -262,7 +267,7 @@ summary(growth$model)$coefficients %>%
 ```
 
 ```{r}
-growth_lin <- lm(growth_theme ~ word_find + word_never + word_always + word_girl + word_go + word_everything + Dates_New + Folk + word_look + Rock, data = df_growth)
+growth_lin <- lm(growth_theme ~ word_find + word_never + word_always + word_girl + word_go + word_everything + Dates_New + Folk + word_look  + word_change + word_another+word_everything + Happy, data = df_growth)
 anova(growth_lin)
 df_pred <- df_pred %>% mutate(growth_theme_score = predict(growth_lin, newdata = df_growth))
 ```
@@ -278,8 +283,8 @@ summary(happy$model)$coefficients %>%
 ```
 
 ```{r}
-happy_lin <- lm(happy_theme ~ word_life + word_right + word_bed + word_need + word_call + word_show + word_way + word_leave, data = df_happy)
-#anova(happy_lin)
+happy_lin <- lm(happy_theme ~ word_life + word_right + word_bed + word_need + word_call + word_show + word_way + word_hear+ Live + word_talk+word_heart+Energy+word_wanted+word_gota + word_felt, data = df_happy)
+anova(happy_lin)
 df_pred <- df_pred %>% mutate(happy_theme_score = predict(happy_lin, newdata = df_happy))
 ```
 
@@ -509,6 +514,7 @@ unrequited_lin <- lm(unrequited_theme ~ word_look + word_better + word_let + Pop
 anova(unrequited_lin)
 #df_pred <- df_pred %>% mutate(unreq = predict(moving_on_lin, newdata = df_moving_on))
 ```
+# Run
 ```{r}
 df_pred <- df %>%
   dplyr::select(song_artist_id, theme_as_factor) %>%
@@ -542,18 +548,34 @@ df_pred <- df %>%
     predicted_theme = theme_words[which.max(c_across(all_of(theme_vars)))]
   ) %>%
   ungroup()
+
+ls_avg <- round(apply(df_pred[sapply(df_pred, is.numeric)], 2, mean),3)
+ls_min <- round(apply(df_pred[sapply(df_pred, is.numeric)], 2, min),3)
+ls_max <- round(apply(df_pred[sapply(df_pred, is.numeric)], 2, max),3)
+
+scores <- data.frame(score = ls_avg,
+             min = ls_min,
+             max = ls_max)
+scores %>% arrange(score)
 ```
 
 ```{r}
 df_pred$theme_as_factor <- gsub(" ", df_pred$theme_as_factor, replacement = "_" )
+df_pred$theme_as_factor <- gsub("/", df_pred$theme_as_factor, replacement = "_" )
+
 
 df_pred <- df_pred %>%
   mutate(match = theme_as_factor == predicted_theme)
-```
 
-```{r}
 df_pred %>%
   group_by(theme_as_factor) %>%
-  summarise(correct = sum(match), total = n(), accuracy = mean(match)) %>% arrange((accuracy))
+  summarise(correct = sum(match), total = n(), accuracy = mean(match)) %>% arrange((theme_as_factor))
+
+mean(df_pred$match)
+```
+```{r}
+df_pred %>%
+  group_by(predicted_theme) %>%
+  summarise(avg = n()) 
 ```
 
