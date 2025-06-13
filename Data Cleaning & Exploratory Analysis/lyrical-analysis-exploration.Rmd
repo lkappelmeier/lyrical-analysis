@@ -19,7 +19,7 @@ library(olsrr)
 # Load Data
 ```{r}
 # Read Lines
-lines <- readLines("Data/lyran.csv", encoding = "UTF-8", warn = FALSE)
+lines <- readLines("lyran.csv", encoding = "UTF-8", warn = FALSE)
 ```
 lyran.csv is the csv file of the song titles, artists, and lyrics
 
@@ -29,10 +29,10 @@ lyran.csv is the csv file of the song titles, artists, and lyrics
 cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
 valid_lines <- cleaned_lines[!is.na(cleaned_lines)]
 # Write Cleaned to New File
-writeLines(valid_lines, "Data/lyran_cleaned.csv")
+writeLines(valid_lines, "lyran_cleaned.csv")
 
 # Read the Cleaned File
-lyrics_data <- read.csv("Data/lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
+lyrics_data <- read.csv("lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
 ```
 # Stop Words and Cleaning Data
 ```{r, warning=FALSE}
@@ -541,6 +541,6 @@ condense <- df_num_full_pred %>%
   select(song, actual_theme, correct_pred, crush_pred, situ_pred, unreq_pred, empowerment_pred,exes_pred, forbidden_love_pred)
 ```
 ```{r}
-write.csv(lyrics_combined, "Data/lyrics_combined.csv")
+write.csv(lyrics_combined, "lyrics_combined.csv")
 ```
 

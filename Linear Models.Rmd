@@ -11,8 +11,8 @@ library(olsrr)
 ```
 ## Data
 ```{r}
-lc <- read_csv("lyrics_combined.csv", show_col_types = FALSE)
-df <- read_csv("df.csv", show_col_types = FALSE)
+lc <- read_csv("Data/lyrics_combined.csv", show_col_types = FALSE)
+df <- read_csv("Data/df.csv", show_col_types = FALSE)
 df <- df %>% drop_na()
 ```
 ## Themes
