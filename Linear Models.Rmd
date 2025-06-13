@@ -18,7 +18,7 @@ df <- df %>% drop_na()
 ## Themes
 ```{r}
 theme_vars <- c(
-  "age_power_dynamic_theme", "crush_theme", "empowerment_theme", "exes_theme", "forbidden_love_theme", 
+  "crush_theme", "empowerment_theme", "exes_theme", "forbidden_love_theme", 
   "grief_theme", "growing_up_theme", "growth_theme", "happy_theme", "hate_theme", 
   "heartbreak_theme", "jealousy_theme", "love_theme", "mental_health_theme", 
   "moving_on_theme", "partying_theme", "rebellion_theme", "religion_theme", 
@@ -30,10 +30,6 @@ theme_words <- gsub( "_theme",theme_vars, replacement = "")
 theme_score <- gsub("_theme", theme_vars, replacement = "_theme_score")
 ```
 ```{r}
-names(df)[names(df) == "age/power dynamic_theme"] <- "age_power_dynamic_theme"
-
-df$theme_as_factor[df$theme_as_factor=="age/power dynamic_theme"] <- "age_power_dynamic_theme"
-
 names(df)[names(df) == "forbidden love_theme"] <- "forbidden_love_theme"
 
 df$theme_as_factor[df$theme_as_factor=="forbidden love_theme"] <- "forbidden_love_theme"
@@ -56,7 +52,7 @@ names(df)[names(df) == "toxic relationship_theme"] <- "toxic_relationship_theme"
 df$theme_as_factor[df$theme_as_factor=="toxic relationship_theme"] <- "toxic_relationship_theme"
 
 df_no_theme <- df[,-c(1,2)] %>% 
-  dplyr::select(-c(any_of(theme_vars), Unknown, Emily, Lauren, Sorel, Sydney, Cathy, `...7334`)) %>% 
+  dplyr::select(-c(any_of(theme_vars), Unknown, Emily, Lauren, Sorel, Sydney, Cathy, `...7086`)) %>% 
   select(where(is.numeric)) %>%
   dplyr::select(where(~sum(.) > 7.5))
 
@@ -65,9 +61,6 @@ df_pred <- df %>% dplyr::select(c(song_artist_id, theme_as_factor))
 
 
 ```{r}
-df_apd <- df_no_theme %>% 
-  mutate(age_power_dynamic_theme = df$age_power_dynamic_theme)
-
 df_crush <- df_no_theme %>% 
   mutate(crush_theme = df$crush_theme)
 
@@ -135,20 +128,6 @@ df_unrequited <- df_no_theme %>%
   mutate(unrequited_theme = df$unrequited_theme)
 ```
 
-# Age/Power Dynamic
-```{r}
-apd <- lm(age_power_dynamic_theme ~ ., data = df_apd)
-apd <- ols_step_backward_r2(apd)
-summary(apd$model)$coefficients %>%
-  as.data.frame() %>%
-  tibble::rownames_to_column("variable") %>%
-  arrange(`Pr(>|t|)`)
-```
-```{r}
-apd_lin <- lm(age_power_dynamic_theme ~ word_bad + word_never + word_hard + word_let + word_cause + word_little + word_look + word_just + Live + word_baby, data = df_apd)
-anova(apd_lin)
-df_pred <- df_pred %>% mutate(age_power_dynamic_theme_score = predict(apd_lin, newdata = df_apd))
-```
 # Crush
 ```{r}
 crush <- lm(crush_theme ~ ., data = df_crush)
