@@ -1,0 +1,112 @@
+---
+title: "TF-IDF Cleaning"
+author: "Lauren Kappelmeier"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# Load Libraries
+```{r}
+library(tidyverse)
+```
+
+# Get Data
+```{r}
+lines <- readLines("Data/lyran.csv", encoding = "UTF-8", warn = TRUE)
+# Lyrics have some weird characters when copy and pasted, have to do a different method rather than just reading csv
+cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
+valid_lines <- cleaned_lines[!is.na(cleaned_lines)]
+
+writeLines(valid_lines, "Data/lyran_cleaned.csv")
+
+# Load Data
+lyrics_data <- read.csv("Data/lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
+```
+# Stop Words
+```{r}
+# Define your custom stop words
+custom_stopwords <- c("ah", "im", "ohohoh", "oo", "uhhuh", "nooh", "s", "yearold", "thatll", "hadnt", "theyve", "imma", "aint", "will", "gonna", "hes", "put", "cant","youve", "youd", "ill", "lets", "can", "ive", "got", "wouldve", "thats", "theyre", "youll", "oh", "dont", "id", "cottontail", "said", "youre", "get", "ooh", "ooooh", "aaaaaaahhhhhh", "aah", "aahooh", "ac", "ahahahahah", "ahh", "ai", "im", "cos","mmmmmmmmmmm","na", "oohooh","ahah","nananana", "lalalala")
+# Combine custom stopwords with the default stop words
+all_stopwords <- c(stopwords("en"), custom_stopwords)
+corpus <- Corpus(VectorSource(lyrics_data$lyrics))
+```
+
+# Clean & Filter Data
+```{r}
+# Clean the corpus
+corpus_clean <- corpus %>%
+  tm_map(tolower) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, all_stopwords) %>%
+  tm_map(stripWhitespace) 
+
+tidy_lyrics <- data.frame(
+  name = rep(lyrics_data$name, each = sapply(corpus_clean, length)),
+  artist = rep(lyrics_data$artist, each = sapply(corpus_clean, length)),
+  theme = rep(lyrics_data$theme, each = sapply(corpus_clean, length)),
+  text = sapply(corpus_clean, as.character),
+  row_id = seq_along(lyrics_data$name),  # Track the original row order
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+# Song artist identifier
+lyrics_data <- tidy_lyrics %>%
+  mutate(song_artist_id = paste(name, artist, sep = "_")) %>%
+  dplyr::select(song_artist_id, theme, text)
+```
+
+
+## Document-Term Matrix (DTM)
+```{r}
+dtm <- DocumentTermMatrix(corpus_clean)
+dtm
+```
+## TF-IDF Scores
+```{r}
+tfidf <- weightTfIdf(dtm)
+tfidf
+```
+## extract
+```{r}
+# to matrix
+tfidf_matrix <- as.matrix(tfidf)
+
+# mean TF-ODF for each term
+mean_tfidf <- colMeans(tfidf_matrix)
+
+# convert to df
+tfidf_data <- data.frame(term = colnames(tfidf_matrix), tfidf = mean_tfidf)
+
+# sort terms
+
+tfidf_data <- tfidf_data[order(tfidf_data$tfidf, decreasing = TRUE), ]
+
+ggplot(tfidf_data, aes(x = reorder(term, tfidf), y = tfidf)) +
+  geom_bar(stat = "identity", fill = "#2E86C1") +
+  labs(title = "TF-IDF Scores for Sample Documents",
+       x = "Term", y = "TF-IDF Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 18, face = "bold"),
+        axis.title = element_text(size = 14, face = "bold"))
+```
+```{r}
+lyrics_words <- lyrics_data %>%
+  mutate(doc_id = row_number()) %>%
+  unnest_tokens(word, text)
+
+tfidf_new <- lyrics_words %>%
+  count(doc_id, word) %>%
+  bind_tf_idf(word, doc_id, n)
+
+tfidf_matrix_new <- tfidf_new %>%
+  select(doc_id, word, tf_idf) %>%
+  pivot_wider(names_from = word, values_from = tf_idf, values_fill = 0)
+
+lyrics_data_id <- lyrics_data %>% mutate(doc_id = row_number())
+tfidf_labels <- tfidf_matrix_new %>%
+  left_join(lyrics_data_id, by = "doc_id")
+```
+
