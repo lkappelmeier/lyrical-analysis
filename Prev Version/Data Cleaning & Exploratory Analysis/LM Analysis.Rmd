@@ -16,8 +16,7 @@ library(caret)
 ```
 # Load Data
 ```{r}
-# Read the file line by line
-lines <- readLines("lyran.csv", encoding = "UTF-8", warn = TRUE)
+lines <- readLines("~/Desktop/lyrical-analysis-lkappelmeier/Data/lyran.csv", encoding = "UTF-8", warn = FALSE)
 
 # Convert encoding and filter invalid lines
 cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
