@@ -1,0 +1,329 @@
+---
+title: "New Exploratory"
+author: "Lauren Kappelmeier"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# Libraries
+```{r}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library("brglm2")
+library(nnet)
+library(glmnet)
+```
+
+# Data
+```{r}
+lines <- readLines("/Users/laurenkappelmeier/Desktop/lyrical-analysis-lkappelmeier/Data/lyran.csv", encoding = "UTF-8", warn = FALSE)
+cleaned_lines <- iconv(lines, from = "UTF-8", to = "UTF-8", sub = "byte")
+valid_lines <- cleaned_lines[!is.na(cleaned_lines)]
+writeLines(valid_lines, "/Users/laurenkappelmeier/Desktop/lyrical-analysis-lkappelmeier/Data/lyran_cleaned.csv")
+lyrics_data <- read.csv("/Users/laurenkappelmeier/Desktop/lyrical-analysis-lkappelmeier/Data/lyran_cleaned.csv", fileEncoding = "UTF-8", stringsAsFactors = FALSE)
+```
+
+# Stopwords
+```{r}
+custom_stopwords <- c("ah", "caa","youre", "im", "oh", "ooh", "la","like", "dont", "yeah","just", "say", "ooooh", "lets", "na", "know", "c", "ill", "cause", "can", "think", "wanna", "got", "get", "now", "cant", "right", "ive", "make", "let", "thats", "shes", "well", "come")
+all_stopwords <- c(stopwords("en"), custom_stopwords)
+corpus <- VCorpus(VectorSource(lyrics_data$lyrics))
+
+corpus_clean <- corpus %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, all_stopwords) %>%
+  tm_map(stripWhitespace)
+
+cleaned_lyrics <- sapply(corpus_clean, content)
+
+tidy_lyrics <- data.frame(
+  name = lyrics_data$name,
+  artist = lyrics_data$artist,
+  theme = lyrics_data$theme,
+  text = cleaned_lyrics,
+  row_id = seq_along(lyrics_data$name),
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+## Note
+#There is a lot of overlap with growing up and reminiscing, so both are going to be reminiscing.
+tidy_lyrics$theme[tidy_lyrics$theme=="growing up"] <- "reminiscing"
+balanced_lyrics <- tidy_lyrics %>%
+  group_by(theme) %>%
+  #slice_sample(n = 20) %>%
+  ungroup()
+```
+# Adding to Data Set
+```{r}
+lyrics_data <- balanced_lyrics %>%
+  mutate(song_artist_id = paste(name, artist, sep = " ")) %>%
+  dplyr::select(song_artist_id, theme, text)
+
+```
+```{r}
+lyrics_data_tokens <- lyrics_data %>% 
+  mutate(text = as.character(text)) %>% # Ensure text is character
+  unnest_tokens(output = word, input = text) %>% # Tokenize
+  group_by(song_artist_id, theme, word) %>% 
+  summarise(word_count = n(), .groups = "drop") # Count words
+
+rare_words <- lyrics_data_tokens %>%
+  count(word, wt = word_count) %>%
+  filter(n < 0) %>%
+  pull(word)
+
+lyrics_data_tokens_filtered <- lyrics_data_tokens %>%
+  filter(!word %in% rare_words)
+
+lyrics_data_wide <- lyrics_data_tokens_filtered %>%
+  pivot_wider(names_from = word, 
+              values_from = word_count,  
+              values_fill = 0,  # missing values with 0
+              names_glue = "word_{word}",  # naming words
+              names_repair = "unique")  # column names unique
+lyrics_theme_binary <- lyrics_data_tokens %>%
+  group_by(song_artist_id, theme) %>%
+  summarise(theme_indicator = 1, .groups = "drop")
+lyrics_theme_onehot <- lyrics_theme_binary %>%
+  pivot_wider(
+    names_from = theme,
+    values_from = theme_indicator,
+    values_fill = 0,
+    names_glue = "{theme}_theme" # Custom column naming for themes
+  )
+```
+
+
+```{r}
+lyrics_combined <- full_join(lyrics_theme_onehot, lyrics_data_wide, by = join_by(song_artist_id))
+```
+
+```{r}
+groups <- lyrics_data_tokens %>% group_by(word)%>% summarise(n=n()) %>% filter(n>2)
+#groups
+lyrics_data_tokens %>% group_by(theme, word) %>% summarise(n=n(),total = sum(word_count), count_per_song = sum(word_count)/n()) %>% arrange(desc(total)) %>% filter(theme == "unrequited") %>% filter(count_per_song>1)
+```
+### note: stopwords -> "go", "one", "ac", "accent", "agree", "ahah", "arent"
+# log
+testing chunk
+## crush
+```{r}
+crush_mod <- glm(crush_theme ~ word_alive + word_alone + word_anyone + word_around +
+                   word_baby + word_back + word_bed + 
+                   word_call + word_cool +
+                   word_else +
+                   word_girls +
+                   word_hands + word_head +
+                   word_keep +
+                   word_little + word_love + 
+                   word_mine + word_move +
+                   word_name + word_need + word_night +
+                   word_one + 
+                   word_stop +
+                   word_tell + word_thinking + word_time + word_touch + 
+                   word_want + word_wont, 
+                 data = lyrics_combined, family = "binomial")
+summary(crush_mod)
+```
+
+## empowerment
+```{r}
+empowerment_mod <- glm(empowerment_theme ~ word_aint + word_always + word_anymore +
+                         word_baby + word_back + word_beautiful + word_bitch + word_boy +
+                         word_girl + word_girls + word_go + word_gonna + word_good + word_guess + 
+                         word_hey + 
+                         word_love +  
+                         word_need +
+                         word_perfect +
+                         word_see +  
+                         word_whats + word_wrong , data = lyrics_combined, family = "binomial")
+summary(empowerment_mod)
+```
+
+
+## exes
+```{r}
+exes_mod <- glm(exes_theme ~ word_back + word_ex + word_never + word_idea  + word_see + word_one + word_tell + word_keep + word_time + word_baby + word_look  + word_exes + word_world + word_made + word_good + word_go + word_bed, data = lyrics_combined, family = "binomial")
+summary(exes_mod)
+```
+
+## forbidden love
+```{r}
+forbidden_love_mod <- glm(`forbidden love_theme` ~word_call+word_loves+word_good+word_one+word_mine+word_girlfriend+word_tell+word_feel+word_want+word_things +word_around+word_someone+word_never+word_way+word_us+word_girl+word_worth+word_try, data = lyrics_combined, family = "binomial")
+summary(forbidden_love_mod)
+```
+
+## grief
+```{r}
+grief_mod <- glm(grief_theme ~ word_run+word_see+word_never+word_will+word_always+word_one+word_changing+word_tell+word_gonna + word_dead+word_things+word_died+word_lost+word_goodbye+word_friend+word_stay+word_still+word_little+word_remember+word_go+word_alive, data = lyrics_combined, family = "binomial")
+summary(grief_mod)
+```
+
+## growth
+```{r}
+growth_mod <- glm(growth_theme ~ word_change+word_gone+word_people+word_talking+word_always+word_alone+word_keep +word_find+word_world+word_long+word_another+word_changing+word_see+word_give+word_theres+word_thought+word_hold+word_grow+word_call+word_back+word_aint+word_try+word_story+word_running+word_place+word_feel+word_fall+word_day+word_wrong, data = lyrics_combined, family = "binomial")
+summary(growth_mod)
+```
+## happy
+```{r}
+happy_mod <- glm(happy_theme ~ word_happy + word_feel + word_life +word_sun+word_back + word_us + word_rat + word_clap + word_along + word_lay +word_going+word_comes+word_worth, data = lyrics_combined, family = "binomial")
+summary(happy_mod)
+```
+
+## hate
+```{r}
+hate_mod <- glm(hate_theme ~ word_hope + word_gone + word_fuck + word_girl + word_even + word_love  + word_hell + word_better + word_bad + word_smile   + word_never + word_go + word_speak  + word_shit + word_theres+ word_hate + word_youve + word_want + word_talking+word_something+word_pretty + word_makes +word_loved+word_boy, data = lyrics_combined, family = "binomial")
+summary(hate_mod)
+```
+
+## heartbreak
+```{r}
+heartbreak_mod <- glm(heartbreak_theme ~ word_always + word_anymore + word_away + 
+                        word_baby + word_back + word_bad + word_break + word_broke +
+                        word_go + 
+                        word_still + word_leave+word_us+word_will+word_used + word_things+word_thought+word_gone+word_day+word_strangers+word_want+word_made+word_mind+word_somebody+word_hits+word_sorry+word_wont+word_shame+word_might+word_maybe+word_lost+word_gave, data = lyrics_combined, family = "binomial")
+summary(heartbreak_mod)
+```
+
+## jealousy
+```{r}
+jealousy_mod <- glm(jealousy_theme ~ word_admit+ word_love + word_words+word_hey+word_want+word_girl+word_one+word_anyone+word_boy, data = lyrics_combined, family = "binomial")
+summary(jealousy_mod)
+```
+
+## love
+```{r}
+love_mod <- glm(love_theme ~ word_love+word_baby+word_will+word_every+word_lonely+word_feel+word_world+word_little+word_around+word_mine+word_head+word_thing+word_snow+word_life+word_maybe+word_look+word_anything+word_talk+word_go+word_still+word_might+word_kiss+word_door+word_crazy+word_beach+word_see+word_man+word_hand+word_need+word_good+word_day+word_worry, data = lyrics_combined, family = "binomial")
+summary(love_mod)
+```
+
+## mental health
+```{r}
+mental_health_mod <- glm(`mental health_theme` ~ word_love + word_feel+word_stay+word_take+word_little+word_mind+word_trying+word_home+word_will+word_go+word_falling+word_waiting+word_eyes+word_different+word_away+word_wanted+word_feels+word_back+word_nothing+word_kid+word_gonna+word_brain+word_together+word_life+word_always+word_wish+word_try+word_fifteen+word_silly+word_sad+word_please+word_leave+word_going+word_day+word_way+word_pull+word_old+word_keep+word_friends, data = lyrics_combined, family = "binomial")
+summary(mental_health_mod)
+```
+
+## moving on
+```{r}
+moving_on_mod <- glm(`moving on_theme` ~ word_never+word_ever+word_gone+word_side+word_new+word_wrong+word_since+word_need+word_around+word_one+word_light+word_waiting+word_together+word_change+word_anymore+word_work+word_thought+word_miss+word_mind+word_call+word_needed+word_green+word_friends+word_everything+word_way+word_theres+word_forget+word_finally+word_count+word_night+word_movin+word_left+word_gotta, data = lyrics_combined, family = "binomial")
+summary(moving_on_mod)
+```
+
+## partying
+```{r}
+partying_mod <- glm(partying_theme ~ word_want + word_tonight + word_gonna+word_go+word_good+word_party +word_put+word_hands+word_club+word_time+word_see+word_dance+word_young+word_roll+word_stop+word_take+word_open+word_die+word_fuck+word_live+word_back+word_beat+word_feel+word_til+word_everybody, data = lyrics_combined, family = "binomial")
+summary(partying_mod)
+```
+
+## rebellion
+```{r}
+rebellion_mod <- glm(rebellion_theme ~ word_bitch+word_man+word_money+word_start+word_fire+word_life+word_left+word_afraid+word_girl+word_probably+word_theyre+word_little+word_dream+word_god+word_need+word_youll+word_love+word_way+word_even+word_go+word_knife+word_legs+word_lost+word_burning+word_dick+word_die+word_ever+word_fast+word_hell+word_sick+word_spread+word_worlds, data = lyrics_combined, family = "binomial")
+summary(rebellion_mod)
+```
+
+## religion
+```{r}
+religion_mod <- glm(religion_theme ~ word_theres+word_love+word_god+word_soul+word_believe+word_find+word_looking+word_die+word_else+word_heaven+word_still+word_wasnt+word_counting+word_fifteen+word_hands+word_never+word_devil+word_gonna+word_hand+word_time+word_go+word_help+word_look, data = lyrics_combined, family = "binomial")
+summary(religion_mod)
+```
+
+## reminiscing
+```{r}
+reminiscing_mod <- glm(reminiscing_theme ~ word_never +word_time+word_old+word_ever+word_still+word_tell+word_love+word_used+word_name+word_mind+word_god+word_keep+word_us+word_years+word_heart+word_one+word_young+word_good+word_home+word_head+word_want+word_wish+word_bless+word_grow+word_little+word_miss+word_friend+word_til+word_around, data = lyrics_combined, family = "binomial")
+summary(reminiscing_mod)
+```
+
+## revenge
+```{r}
+revenge_mod <- glm(revenge_theme ~ word_back +word_gonna+word_made+word_said+word_look+word_bye+word_comin+word_party+word_call+word_love+word_sorry+word_time+word_karma, data = lyrics_combined, family = "binomial")
+summary(revenge_mod)
+```
+
+## situationship
+
+```{r}
+situationship_mod <- glm(situationship_theme ~ word_want+word_one+word_baby+word_love+word_someone+word_girl+word_give+word_still+word_cool+word_leave+word_take+word_listen+word_see+word_aint+word_put+word_mine+word_friends+word_go+word_youd+word_always+word_knew+word_fun+word_hate+word_everything+word_keep+word_maybe+word_much+word_night+word_two+word_casual+word_hope+word_wish+word_chill+word_high+word_light+word_away+word_every+word_kills+word_better+word_boy+word_cold, data = lyrics_combined, family = "binomial")
+summary(situationship_mod)
+```
+
+## toxic relationship
+```{r}
+toxic_relationship_mod <- glm(`toxic relationship_theme` ~ word_go+word_take+word_time+word_trouble+word_ever+word_always+word_id+word_one+word_watch+word_life+word_mind+word_ruin+word_tell+word_wanted+word_love+word_give+word_said+word_still+word_knew+word_hes+word_cold+word_place+word_falling+word_yes+word_believe+word_around+word_away+word_changes+word_friends+word_maybe, data = lyrics_combined, family = "binomial")
+summary(toxic_relationship_mod)
+```
+
+## unrequited
+```{r}
+unrequited_mod <- glm(unrequited_theme ~ word_love+word_better+word_never+word_touch+word_kiss+word_used+word_dreams+word_look+word_falling+word_eyes+word_feel+word_keep+word_said+word_take+word_time+word_us+word_day+word_find+word_one+word_friend+word_go+word_last+word_thought+word_tell+word_wish+word_wont+word_anyway+word_maybe+word_pretty+word_belong+word_close+word_heart+word_hes+word_told+word_beautiful+word_lose+word_wait+word_baby+word_dancing+word_ever+word_home+word_kind+word_mine+word_still+word_best+word_chasing+word_feeling+word_forever, data = lyrics_combined, family = "binomial")
+summary(unrequited_mod)
+```
+
+## scores
+
+```{r}
+lyrics_combined$crush_score <- predict(crush_mod, type = "response")
+lyrics_combined$empowerment_score <- predict(empowerment_mod, type = "response")
+lyrics_combined$exes_score <- predict(exes_mod, type = "response")
+lyrics_combined$forbidden_love_score <- predict(forbidden_love_mod, type = "response")
+lyrics_combined$grief_score <- predict(grief_mod, type = "response")
+lyrics_combined$growth_score <- predict(growth_mod, type = "response")
+lyrics_combined$happy_score <- predict(happy_mod, type = "response")
+lyrics_combined$hate_score <- predict(hate_mod, type = "response")
+lyrics_combined$heartbreak_score <- predict(heartbreak_mod, type = "response")
+lyrics_combined$jealousy_score <- predict(jealousy_mod, type = "response")
+lyrics_combined$love_score <- predict(love_mod, type = "response")
+lyrics_combined$mental_health_score <- predict(mental_health_mod, type = "response")
+lyrics_combined$moving_on_score <- predict(moving_on_mod, type = "response")
+lyrics_combined$partying_score <- predict(partying_mod, type = "response")
+lyrics_combined$rebellion_score <- predict(rebellion_mod, type = "response")
+lyrics_combined$religion_score <- predict(religion_mod,type = "response")
+lyrics_combined$reminiscing_score <- predict(reminiscing_mod, type= "response")
+lyrics_combined$revenge_score <- predict(revenge_mod, type = "response")
+lyrics_combined$situationship_score <- predict(situationship_mod, type = "response")
+lyrics_combined$toxic_relationship_score <- predict(toxic_relationship_mod, type = "response")
+lyrics_combined$unrequited_score <- predict(unrequited_mod, type = "response")
+#matrix 
+score_matrix <- lyrics_combined %>%
+  select(crush_score, empowerment_score, exes_score, forbidden_love_score, grief_score, growth_score, happy_score, hate_score, heartbreak_score, jealousy_score, love_score, mental_health_score, moving_on_score, partying_score, rebellion_score, religion_score,reminiscing_score, revenge_score, situationship_score,toxic_relationship_score, unrequited_score) %>%
+  as.matrix()
+
+max_index <- max.col(score_matrix, ties.method = "first")
+
+theme_names <- c("crush", "empowerment", "exes", "forbidden love", "grief", "growth", "happy", "hate", "heartbreak", "jealousy", "love", "mental health", "moving on","partying", "rebellion", "religion", "reminiscing", "revenge", "situationship", "toxic relationship", "unrequited")
+lyrics_combined$predicted_theme <- theme_names[max_index]
+lyrics_combined <- lyrics_combined %>%
+  mutate(theme_match = theme == predicted_theme)
+lc <- lyrics_combined %>% select(song_artist_id, theme, predicted_theme, theme_match, crush_score, empowerment_score, exes_score, forbidden_love_score, grief_score, growth_score, happy_score, hate_score, heartbreak_score, jealousy_score, love_score, mental_health_score, partying_score, rebellion_score, religion_score, reminiscing_score, revenge_score, situationship_score, toxic_relationship_score, unrequited_score)
+```
+
+```{r}
+theme_accuracies <- lyrics_combined %>%
+  group_by(theme) %>%
+  summarise(
+    correct = sum(theme_match),
+    total = n(),
+    accuracy = mean(theme_match),
+    .groups = "drop"
+  ) %>% arrange(accuracy)
+mean(lyrics_combined$theme_match)
+print(theme_accuracies)
+```
+
+```{r}
+poisson_mod <- glm(word_anyone~ crush_theme + empowerment_theme+exes_theme+`forbidden love_theme` + grief_theme+growth_theme+happy_theme+hate_theme+heartbreak_theme+jealousy_theme+love_theme+`mental health_theme` + `moving on_theme` + partying_theme + rebellion_theme + religion_theme+reminiscing_theme+revenge_theme+situationship_theme+`toxic relationship_theme` + unrequited_theme,
+                   data = lyrics_combined, family = "poisson")
+summary(poisson_mod)
+```
+
+## later
+```{r}
+cols <- colnames(lyrics_data_wide[-1:-2])
+lyrics_combined[cols] <- scale(lyrics_combined[cols])
+lyrics_data_wide[cols] <- scale(lyrics_data_wide[cols])
+```
+
