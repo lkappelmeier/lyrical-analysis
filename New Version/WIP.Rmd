@@ -315,12 +315,159 @@ print(theme_accuracies)
 ```
 
 ```{r}
-poisson_mod <- glm(word_anyone~ crush_theme + empowerment_theme+exes_theme+`forbidden love_theme` + grief_theme+growth_theme+happy_theme+hate_theme+heartbreak_theme+jealousy_theme+love_theme+`mental health_theme` + `moving on_theme` + partying_theme + rebellion_theme + religion_theme+reminiscing_theme+revenge_theme+situationship_theme+`toxic relationship_theme` + unrequited_theme,
+poisson_mod <- glm(word_anyone~ crush_theme + empowerment_theme+exes_theme+`forbidden love_theme` + grief_theme+growth_theme+happy_theme+hate_theme+heartbreak_theme+jealousy_theme+love_theme+`mental health_theme` + `moving on_theme` + partying_theme + rebellion_theme + religion_theme+revenge_theme+situationship_theme+`toxic relationship_theme` + unrequited_theme+reminiscing_theme,
                    data = lyrics_combined, family = "poisson")
 summary(poisson_mod)
 ```
 
-## later
+# Variable Selection
+```{r}
+rare_words <- lyrics_data_tokens %>%
+  count(word, wt = word_count) %>%
+  filter(n < 200) %>%
+  pull(word)
+
+lyrics_data_tokens_filtered <- lyrics_data_tokens %>%
+  filter(!word %in% rare_words)
+
+lyrics_data_wide <- lyrics_data_tokens_filtered %>%
+  pivot_wider(names_from = word, 
+              values_from = word_count,  
+              values_fill = 0,  # missing values with 0
+              names_glue = "word_{word}",  # naming words
+              names_repair = "unique")  # column names unique
+lyrics_theme_binary <- lyrics_data_tokens %>%
+  group_by(song_artist_id, theme) %>%
+  summarise(theme_indicator = 1, .groups = "drop")
+lyrics_theme_onehot <- lyrics_theme_binary %>%
+  pivot_wider(
+    names_from = theme,
+    values_from = theme_indicator,
+    values_fill = 0,
+    names_glue = "{theme}_theme" # Custom column naming for themes
+  )
+lyrics_combined <- inner_join(lyrics_theme_onehot, lyrics_data_wide, by = join_by(song_artist_id))
+```
+
+```{r}
+theme_list <- c("song_artist_id", "theme", "crush_theme", "empowerment_theme", "exes_theme", "forbidden love_theme", "grief_theme", "growth_theme", "happy_theme", "hate_theme", "heartbreak_theme", "jealousy_theme", "love_theme", "mental health_theme", "moving on_theme","partying_theme", "rebellion_theme", "religion_theme", "reminiscing_theme", "revenge_theme", "situationship_theme", "toxic relationship_theme", "unrequited_theme")
+```
+
+
+```{r}
+lc_crush <- lyrics_combined %>%
+  select(-all_of(setdiff(theme_list, c("crush_theme"))))
+lc_empowerment <- lyrics_combined %>% 
+  select(-all_of(setdiff(theme_list, c("empowerment_theme"))))
+```
+```{r}
+# Remove response variable
+x <- model.matrix(crush_theme ~ ., data = lc_crush)[, -1]  # Remove intercept column
+
+# Set response variable (must be numeric 0/1)
+y <- lc_crush$crush_theme
+cv_fit <- cv.glmnet(x, y, alpha = 1, family = "binomial")  # alpha = 1 means LASSO
+
+best_lambda <- cv_fit$lambda.min
+coef(cv_fit, s = best_lambda)
+selected_vars_crush <- rownames(coef(cv_fit, s = best_lambda))[which(coef(cv_fit, s = best_lambda) != 0)]
+selected_vars_crush <- setdiff(selected_vars_crush, "(Intercept)")
+selected_vars_crush
+```
+
+## empowerment
+```{r}
+x <- model.matrix(empowerment_theme ~ ., data = lc_empowerment)[, -1]  # Remove intercept column
+y <- lc_empowerment$empowerment_theme
+cv_fit <- cv.glmnet(x, y, alpha = 1, family = "binomial")  # alpha = 1 means LASSO
+
+best_lambda <- cv_fit$lambda.min
+coef(cv_fit, s = best_lambda)
+selected_vars_emp <- rownames(coef(cv_fit, s = best_lambda))[which(coef(cv_fit, s = best_lambda) != 0)]
+selected_vars_empowerment <- setdiff(selected_vars_emp, "(Intercept)")
+selected_vars_empowerment
+```
+
+```{r}
+
+lyrics_data_wide <- lyrics_data_tokens %>%
+  pivot_wider(names_from = word, 
+              values_from = word_count,  
+              values_fill = 0,  # missing values with 0
+              names_glue = "word_{word}",  # naming words
+              names_repair = "unique")  # column names unique
+lyrics_theme_binary <- lyrics_data_tokens %>%
+  group_by(song_artist_id, theme) %>%
+  summarise(theme_indicator = 1, .groups = "drop")
+lyrics_theme_onehot <- lyrics_theme_binary %>%
+  pivot_wider(
+    names_from = theme,
+    values_from = theme_indicator,
+    values_fill = 0,
+    names_glue = "{theme}_theme" # Custom column naming for themes
+  )
+lyrics_combined <- inner_join(lyrics_theme_onehot, lyrics_data_wide, by = join_by(song_artist_id))
+```
+
+```{r}
+formula_str <- paste("crush_theme ~", paste(selected_vars_crush, collapse = " + "))
+crush_glmnet <- glm(as.formula(formula_str), data = lyrics_combined, family = "binomial")
+summary(crush_glmnet)
+formula_str <- paste("empowerment_theme ~", paste(selected_vars_emp, collapse = " + "))
+empowerment_glmnet <- glm(as.formula(formula_str), data = lyrics_combined, family = "binomial")
+summary(empowerment_glmnet)
+
+```
+```{r}
+lyrics_combined$crush_score <- predict(crush_glmnet, type = "response")
+lyrics_combined$empowerment_score <- predict(empowerment_glmnet, type = "response")
+lyrics_combined$exes_score <- predict(exes_mod, type = "response")
+lyrics_combined$forbidden_love_score <- predict(forbidden_love_mod, type = "response")
+lyrics_combined$grief_score <- predict(grief_mod, type = "response")
+lyrics_combined$growth_score <- predict(growth_mod, type = "response")
+lyrics_combined$happy_score <- predict(happy_mod, type = "response")
+lyrics_combined$hate_score <- predict(hate_mod, type = "response")
+lyrics_combined$heartbreak_score <- predict(heartbreak_mod, type = "response")
+lyrics_combined$jealousy_score <- predict(jealousy_mod, type = "response")
+lyrics_combined$love_score <- predict(love_mod, type = "response")
+lyrics_combined$mental_health_score <- predict(mental_health_mod, type = "response")
+lyrics_combined$moving_on_score <- predict(moving_on_mod, type = "response")
+lyrics_combined$partying_score <- predict(partying_mod, type = "response")
+lyrics_combined$rebellion_score <- predict(rebellion_mod, type = "response")
+lyrics_combined$religion_score <- predict(religion_mod,type = "response")
+lyrics_combined$reminiscing_score <- predict(reminiscing_mod, type= "response")
+lyrics_combined$revenge_score <- predict(revenge_mod, type = "response")
+lyrics_combined$situationship_score <- predict(situationship_mod, type = "response")
+lyrics_combined$toxic_relationship_score <- predict(toxic_relationship_mod, type = "response")
+lyrics_combined$unrequited_score <- predict(unrequited_mod, type = "response")
+#matrix 
+score_matrix <- lyrics_combined %>%
+  select(crush_score, empowerment_score, exes_score, forbidden_love_score, grief_score, growth_score, happy_score, hate_score, heartbreak_score, jealousy_score, love_score, mental_health_score, moving_on_score, partying_score, rebellion_score, religion_score,reminiscing_score, revenge_score, situationship_score,toxic_relationship_score, unrequited_score) %>%
+  as.matrix()
+
+max_index <- max.col(score_matrix, ties.method = "first")
+
+theme_names <- c("crush", "empowerment", "exes", "forbidden love", "grief", "growth", "happy", "hate", "heartbreak", "jealousy", "love", "mental health", "moving on","partying", "rebellion", "religion", "reminiscing", "revenge", "situationship", "toxic relationship", "unrequited")
+lyrics_combined$predicted_theme <- theme_names[max_index]
+lyrics_combined <- lyrics_combined %>%
+  mutate(theme_match = theme == predicted_theme)
+lc <- lyrics_combined %>% select(song_artist_id, theme, predicted_theme, theme_match, crush_score, empowerment_score, exes_score, forbidden_love_score, grief_score, growth_score, happy_score, hate_score, heartbreak_score, jealousy_score, love_score, mental_health_score, partying_score, rebellion_score, religion_score, reminiscing_score, revenge_score, situationship_score, toxic_relationship_score, unrequited_score)
+```
+```{r}
+theme_accuracies <- lyrics_combined %>%
+  group_by(theme) %>%
+  summarise(
+    correct = sum(theme_match),
+    total = n(),
+    accuracy = mean(theme_match),
+    .groups = "drop"
+  ) %>% arrange(accuracy)
+mean(lyrics_combined$theme_match)
+print(theme_accuracies)
+```
+
+
+
 ```{r}
 cols <- colnames(lyrics_data_wide[-1:-2])
 lyrics_combined[cols] <- scale(lyrics_combined[cols])
